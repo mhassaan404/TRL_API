@@ -1,0 +1,44 @@
+﻿@model TRL_API.Models.Dashboard
+
+@{
+    ViewData["Title"] = "Edit";
+}
+
+<h1>Edit</h1>
+
+<h4>Dashboard</h4>
+<hr />
+<div class="row">
+    <div class="col-md-4">
+        <form asp-action="Edit">
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+            <input type="hidden" asp-for="Month" />
+            <div class="form-group">
+                <label asp-for="TenantCount" class="control-label"></label>
+                <input asp-for="TenantCount" class="form-control" />
+                <span asp-validation-for="TenantCount" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="TotalRent" class="control-label"></label>
+                <input asp-for="TotalRent" class="form-control" />
+                <span asp-validation-for="TotalRent" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Collected" class="control-label"></label>
+                <input asp-for="Collected" class="form-control" />
+                <span asp-validation-for="Collected" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <input type="submit" value="Save" class="btn btn-primary" />
+            </div>
+        </form>
+    </div>
+</div>
+
+<div>
+    <a asp-action="Index">Back to List</a>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}

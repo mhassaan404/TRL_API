@@ -26,5 +26,6 @@ namespace TRL_API.Controllers
             var list = DataTableHelper.ToDictionaryList(data);
             return Ok(list);
         }
+
     }
 }

@@ -1,6 +1,6 @@
 ﻿using System.Data;
 
-namespace TRL_API.BLL
+namespace TRL_API.Helpers
 {
     public class DataTableHelper
     {

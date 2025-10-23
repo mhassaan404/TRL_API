@@ -1,5 +1,6 @@
 ﻿using Microsoft.Data.SqlClient;
 using System.Data;
+using TRL_API.Data;
 
 namespace TRL_API.DAL
 {

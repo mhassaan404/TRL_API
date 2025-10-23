@@ -1,7 +1,7 @@
 ﻿using Microsoft.Data.SqlClient;
 using System.Data;
 
-namespace TRL_API.DAL
+namespace TRL_API.Data
 {
     public class DbHelper
     {
@@ -12,38 +12,47 @@ namespace TRL_API.DAL
             _connectionString = configuration.GetConnectionString("DefaultConnection")!;
         }
 
-        public async Task<DataTable> ExecuteQueryAsync(string query, SqlParameter[]? parameters = null)
+        public async Task<DataTable> ExecuteQueryAsync(string query, SqlParameter[]? parameters = null, bool isStoredProc = false)
         {
-            var dt = new DataTable();
             using (var conn = new SqlConnection(_connectionString))
             {
                 await conn.OpenAsync();
                 using (var cmd = new SqlCommand(query, conn))
                 {
+                    if (isStoredProc)
+                        cmd.CommandType = CommandType.StoredProcedure;
+
                     if (parameters != null)
                         cmd.Parameters.AddRange(parameters);
 
-                    using (var reader = await cmd.ExecuteReaderAsync())
+                    using (var adapter = new SqlDataAdapter(cmd))
                     {
-                        dt.Load(reader);
+                        var dt = new DataTable();
+                        adapter.Fill(dt);
+                        return dt;
                     }
                 }
             }
-            return dt;
         }
 
-        public async Task<int> ExecuteNonQueryAsync(string query, SqlParameter[]? parameters = null)
+        public async Task<int> ExecuteCommandAsync(string query, SqlParameter[]? parameters = null, bool isStoredProc = false)
         {
             using (var conn = new SqlConnection(_connectionString))
             {
                 await conn.OpenAsync();
                 using (var cmd = new SqlCommand(query, conn))
                 {
+                    if (isStoredProc)
+                        cmd.CommandType = CommandType.StoredProcedure;
+
                     if (parameters != null)
                         cmd.Parameters.AddRange(parameters);
+
                     return await cmd.ExecuteNonQueryAsync();
                 }
             }
         }
+
+
     }
 }

@@ -37,22 +37,28 @@ namespace TRL_API.Data
 
         public async Task<int> ExecuteCommandAsync(string query, SqlParameter[]? parameters = null, bool isStoredProc = false)
         {
-            using (var conn = new SqlConnection(_connectionString))
+            try
             {
-                await conn.OpenAsync();
-                using (var cmd = new SqlCommand(query, conn))
+                using (var conn = new SqlConnection(_connectionString))
                 {
-                    if (isStoredProc)
-                        cmd.CommandType = CommandType.StoredProcedure;
+                    await conn.OpenAsync();
 
-                    if (parameters != null)
-                        cmd.Parameters.AddRange(parameters);
+                    using (var cmd = new SqlCommand(query, conn))
+                    {
+                        if (isStoredProc)
+                            cmd.CommandType = CommandType.StoredProcedure;
 
-                    return await cmd.ExecuteNonQueryAsync();
+                        if (parameters != null)
+                            cmd.Parameters.AddRange(parameters);
+
+                        return await cmd.ExecuteNonQueryAsync();
+                    }
                 }
             }
+            catch (SqlException ex)
+            {
+                throw new Exception($"SQL Error: {ex.Message}", ex);
+            }
         }
-
-
     }
 }

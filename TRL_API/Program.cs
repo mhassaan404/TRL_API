@@ -59,6 +59,7 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowAll", p => p.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
 });
 
+builder.Services.AddScoped<DbHelper>();
 var app = builder.Build();
 app.UseCors("AllowAll");
 

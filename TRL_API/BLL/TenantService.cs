@@ -35,20 +35,42 @@ namespace TRL_API.BLL
 
         public async Task<ApiResponse> SaveTenantAsync(Tenants tenant)
         {
-            int result = await _dal.SaveTenantAsync(tenant);
+            var (result, error) = await _dal.SaveTenantAsync(tenant);
             if (result > 0)
-                return new ApiResponse { Success = true, Message = "Tenant saved successfully!" };
+                return new ApiResponse { Success = true, Message = "Tenant saved successfully." };
             else
-                return new ApiResponse { Success = false, ErrorMessage = "No record saved!" };
+                return new ApiResponse { Success = false, ErrorMessage = "No record saved." };
         }
 
         public async Task<ApiResponse> UpdateTenantAsync(Tenants tenant)
         {
-            int result = await _dal.UpdateTenantAsync(tenant);
+            var (result, error) = await _dal.UpdateTenantAsync(tenant);
             if (result > 0)
-                return new ApiResponse { Success = true, Message = "Tenant updated successfully!" };
+                return new ApiResponse { Success = true, Message = "Tenant updated successfully." };
             else
-                return new ApiResponse { Success = false, ErrorMessage = "No record saved!" };
+                return new ApiResponse { Success = false, ErrorMessage = "No record saved." };
+        }
+
+        public async Task<ApiResponse> DeleteTenantAsync(int tenantId)
+        {
+            var (result, error) = await _dal.DeleteTenantAsync(tenantId);
+
+            if (!string.IsNullOrEmpty(error))
+            {
+                if (error.Contains("FK__RentInvoi__Tenan__"))
+                    error = "Cannot delete tenant because there are existing rent invoices. Please delete invoices first.";
+                else if (error.Contains("REFERENCE constraint"))
+                    error = "Cannot delete tenant because it is referenced in another record.";
+                else
+                    error = "Error occurred while deleting tenant. Please try again.";
+
+                return new ApiResponse { Success = false, ErrorMessage = error };
+            }
+
+            if (result > 0)
+                return new ApiResponse { Success = true, Message = "Tenant deleted successfully" };
+
+            return new ApiResponse { Success = false, ErrorMessage = "Tenant not found or already deleted." };
         }
     }
 }

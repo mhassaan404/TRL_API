@@ -62,8 +62,15 @@ namespace TRL_API.Controllers
         [HttpPut("UpdateTenants")]
         public async Task<IActionResult> UpdateTenantAsync(Tenants tenant)
         {
-            tenant.UpdatedBy = User.Identity?.Name?.ToString();
+            tenant.UpdatedBy = User.GetUserId();
             var response = await _service.UpdateTenantAsync(tenant);
+            return Ok(response);
+        }
+
+        [HttpDelete("DeleteTenants")]
+        public async Task<IActionResult> DeleteTenantAsync(int tenantId)
+        {
+            var response = await _service.DeleteTenantAsync(tenantId);
             return Ok(response);
         }
     }

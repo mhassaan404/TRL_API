@@ -83,36 +83,52 @@ namespace TRL_API.DAL
             return dt;
         }
 
-        public async Task<int> SaveTenantAsync(Tenants tenant)
+        public async Task<(int Result, string ErrorMessage)> SaveTenantAsync(Tenants tenant)
         {
-            string query = @"
-                INSERT INTO [dbo].[Tenants]
-                    (Name, BuildingId, FloorId, UnitId, Contact, Email, MonthlyRent, MoveOutDate, City, CreatedBy, CreatedAt, IsActive)
-                VALUES
-                    (@Name, @BuildingId, @FloorId, @UnitId, @Contact, @Email, @MonthlyRent, @MoveOutDate, @City, @CreatedBy, GETUTCDATE(), @IsActive)";
-
-            var parameters = new[]
+            try
             {
-                new SqlParameter("@Name", tenant.Name ?? (object)DBNull.Value),
-                new SqlParameter("@BuildingId", tenant.BuildingId == 0 ? (object)DBNull.Value : tenant.BuildingId),
-                new SqlParameter("@FloorId", tenant.FloorId == 0 ? (object)DBNull.Value : tenant.FloorId),
-                new SqlParameter("@UnitId", tenant.UnitId == 0 ? (object)DBNull.Value : tenant.UnitId),
-                new SqlParameter("@Contact", tenant.Contact ?? (object)DBNull.Value),
-                new SqlParameter("@Email", tenant.Email ?? (object)DBNull.Value),
-                new SqlParameter("@MonthlyRent", tenant.MonthlyRent == 0 ? (object)DBNull.Value : tenant.MonthlyRent),
-                new SqlParameter("@MoveOutDate", tenant.MoveOutDate ?? (object)DBNull.Value),
-                new SqlParameter("@City", tenant.City ?? (object)DBNull.Value),
-                new SqlParameter("@CreatedBy", tenant.CreatedBy == 0 ? (object)DBNull.Value : tenant.UnitId),
-                new SqlParameter("@IsActive", tenant.IsActive ?? (object)DBNull.Value)
-            };
+                string query = @"
+                INSERT INTO [dbo].[Tenants]
+                    (Name, BuildingId, FloorId, UnitId, Contact, Email, MonthlyRent, MoveOutDate, City, CreatedBy, CreatedAt, Notes, IsActive)
+                VALUES
+                    (@Name, @BuildingId, @FloorId, @UnitId, @Contact, @Email, @MonthlyRent, @MoveOutDate, @City, @CreatedBy, GETUTCDATE(), @Notes, @IsActive)";
 
-            int result = await _dbHelper.ExecuteCommandAsync(query, parameters);
-            return result;
+                if (tenant.IsActive == true)
+                    tenant.MoveOutDate = null;
+                else
+                    tenant.MoveOutDate = DateTime.UtcNow;
+
+                var parameters = new[]
+                {
+                    new SqlParameter("@Name", tenant.Name ?? (object)DBNull.Value),
+                    new SqlParameter("@BuildingId", tenant.BuildingId == 0 ? (object)DBNull.Value : tenant.BuildingId),
+                    new SqlParameter("@FloorId", tenant.FloorId == 0 ? (object)DBNull.Value : tenant.FloorId),
+                    new SqlParameter("@UnitId", tenant.UnitId == 0 ? (object)DBNull.Value : tenant.UnitId),
+                    new SqlParameter("@Contact", tenant.Contact ?? (object)DBNull.Value),
+                    new SqlParameter("@Email", tenant.Email ?? (object)DBNull.Value),
+                    new SqlParameter("@MonthlyRent", tenant.MonthlyRent == 0 ? (object)DBNull.Value : tenant.MonthlyRent),
+                    new SqlParameter("@MoveOutDate", tenant.MoveOutDate ?? (object)DBNull.Value),
+                    new SqlParameter("@City", tenant.City ?? (object)DBNull.Value),
+                    new SqlParameter("@CreatedBy", tenant.CreatedBy == 0 ? (object)DBNull.Value : tenant.UnitId),
+                    new SqlParameter("@CreatedAt", tenant.CreatedAt ?? (object)DBNull.Value),
+                    new SqlParameter("@Notes", tenant.Notes ?? (object)DBNull.Value),
+                    new SqlParameter("@IsActive", tenant.IsActive ?? (object)DBNull.Value)
+                };
+
+                int result = await _dbHelper.ExecuteCommandAsync(query, parameters);
+                return (result, "");
+            }
+            catch (Exception ex)
+            {
+                return (0, ex.Message); // return error message
+            }
         }
 
-        public async Task<int> UpdateTenantAsync(Tenants tenant)
+        public async Task<(int Result, string ErrorMessage)> UpdateTenantAsync(Tenants tenant)
         {
-            string query = @"
+            try
+            {
+                string query = @"
             UPDATE [dbo].[Tenants]
             SET
                 Name = @Name,
@@ -126,27 +142,60 @@ namespace TRL_API.DAL
                 City = @City,
                 UpdatedBy = @UpdatedBy,
                 UpdatedAt = GETUTCDATE(),
+                Notes=@Notes,
                 IsActive = @IsActive
             WHERE TenantId = @TenantId";
 
-            var parameters = new[]
-            {
-                new SqlParameter("@TenantId", tenant.TenantId),
-                new SqlParameter("@Name", tenant.Name ?? (object)DBNull.Value),
-                new SqlParameter("@BuildingId", tenant.BuildingId == 0 ? (object)DBNull.Value : tenant.BuildingId),
-                new SqlParameter("@FloorId", tenant.FloorId == 0 ? (object)DBNull.Value : tenant.FloorId),
-                new SqlParameter("@UnitId", tenant.UnitId == 0 ? (object)DBNull.Value : tenant.UnitId),
-                new SqlParameter("@Contact", tenant.Contact ?? (object)DBNull.Value),
-                new SqlParameter("@Email", tenant.Email ?? (object)DBNull.Value),
-                new SqlParameter("@MonthlyRent", tenant.MonthlyRent == 0 ? (object)DBNull.Value : tenant.MonthlyRent),
-                new SqlParameter("@MoveOutDate", tenant.MoveOutDate ?? (object)DBNull.Value),
-                new SqlParameter("@City", tenant.City ?? (object)DBNull.Value),
-                new SqlParameter("@UpdatedBy", tenant.UpdatedBy ?? (object)DBNull.Value),
-                new SqlParameter("@IsActive", tenant.IsActive ?? (object)DBNull.Value)
-            };
+                if (tenant.IsActive == true)
+                    tenant.MoveOutDate = null;
+                else
+                    tenant.MoveOutDate = DateTime.UtcNow;
 
-            int result = await _dbHelper.ExecuteCommandAsync(query, parameters);
-            return result;
+                var parameters = new[]
+                {
+                    new SqlParameter("@TenantId", tenant.TenantId),
+                    new SqlParameter("@Name", tenant.Name ?? (object)DBNull.Value),
+                    new SqlParameter("@BuildingId", tenant.BuildingId == 0 ? (object)DBNull.Value : tenant.BuildingId),
+                    new SqlParameter("@FloorId", tenant.FloorId == 0 ? (object)DBNull.Value : tenant.FloorId),
+                    new SqlParameter("@UnitId", tenant.UnitId == 0 ? (object)DBNull.Value : tenant.UnitId),
+                    new SqlParameter("@Contact", tenant.Contact ?? (object)DBNull.Value),
+                    new SqlParameter("@Email", tenant.Email ?? (object)DBNull.Value),
+                    new SqlParameter("@MonthlyRent", tenant.MonthlyRent == 0 ? (object)DBNull.Value : tenant.MonthlyRent),
+                    new SqlParameter("@MoveOutDate", tenant.MoveOutDate ?? (object)DBNull.Value),
+                    new SqlParameter("@City", tenant.City ?? (object)DBNull.Value),
+                    new SqlParameter("@UpdatedBy", tenant.UpdatedBy == 0 ? (object)DBNull.Value : tenant.UpdatedBy),
+                    new SqlParameter("@UpdatedAt", tenant.UpdatedAt ?? (object)DBNull.Value),
+                    new SqlParameter("@Notes", tenant.Notes ?? (object)DBNull.Value),
+                    new SqlParameter("@IsActive", tenant.IsActive ?? (object)DBNull.Value)
+                };
+
+                int result = await _dbHelper.ExecuteCommandAsync(query, parameters);
+                return (result, "");
+            }
+            catch (Exception ex)
+            {
+                return (0, ex.Message); // return error message
+            }
+        }
+
+        public async Task<(int Result, string ErrorMessage)> DeleteTenantAsync(int tenantId)
+        {
+            try
+            {
+                string query = @"DELETE FROM [dbo].[Tenants] WHERE TenantId = @TenantId";
+
+                var parameters = new[]
+                {
+                    new SqlParameter("@TenantId", tenantId),
+                };
+
+                int result = await _dbHelper.ExecuteCommandAsync(query, parameters);
+                return (result, "");
+            }
+            catch (Exception ex)
+            {
+                return (0, ex.Message); // return error message
+            }
         }
 
     }

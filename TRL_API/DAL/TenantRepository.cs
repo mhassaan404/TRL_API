@@ -16,8 +16,8 @@ namespace TRL_API.DAL
 
         public async Task<DataTable> GetTenants()
         {
-            string query = @"select t.*, b.BuildingName, f.FloorNumber, u.UnitNumber from [dbo].[Tenants] t left join Buildings b on t.BuildingId=b.BuildingId
-                left join Floors f on t.FloorId=f.FloorId left join Units u on t.UnitId=u.UnitId";
+            string query = @"select t.*, b.BuildingName, f.FloorNumber, u.UnitNumber, c.Name AS CityName from [dbo].[Tenants] t  LEFT JOIN Buildings b on t.BuildingId=b.BuildingId
+                 LEFT JOIN Floors f on t.FloorId=f.FloorId  LEFT JOIN Units u on t.UnitId=u.UnitId LEFT JOIN City c ON t.CityId = c.Id";
             var dt = await _dbHelper.ExecuteQueryAsync(query);
             return dt;
         }
@@ -76,9 +76,9 @@ namespace TRL_API.DAL
             return dt;
         }
 
-        public async Task<DataTable> GetUnits()
+        public async Task<DataTable> GetCities()
         {
-            string query = @"select * from [dbo].[Tenants]";
+            string query = @"select * from [dbo].[City]";
             var dt = await _dbHelper.ExecuteQueryAsync(query);
             return dt;
         }
@@ -89,9 +89,9 @@ namespace TRL_API.DAL
             {
                 string query = @"
                 INSERT INTO [dbo].[Tenants]
-                    (Name, BuildingId, FloorId, UnitId, Contact, Email, MonthlyRent, MoveOutDate, City, CreatedBy, CreatedAt, Notes, IsActive)
+                    (Name, BuildingId, FloorId, UnitId, Contact, Email, MonthlyRent, MoveOutDate, CityId, CreatedBy, CreatedAt, Notes, IsActive)
                 VALUES
-                    (@Name, @BuildingId, @FloorId, @UnitId, @Contact, @Email, @MonthlyRent, @MoveOutDate, @City, @CreatedBy, GETUTCDATE(), @Notes, @IsActive)";
+                    (@Name, @BuildingId, @FloorId, @UnitId, @Contact, @Email, @MonthlyRent, @MoveOutDate, @CityId, @CreatedBy, GETUTCDATE(), @Notes, @IsActive)";
 
                 if (tenant.IsActive == true)
                     tenant.MoveOutDate = null;
@@ -108,7 +108,7 @@ namespace TRL_API.DAL
                     new SqlParameter("@Email", tenant.Email ?? (object)DBNull.Value),
                     new SqlParameter("@MonthlyRent", tenant.MonthlyRent == 0 ? (object)DBNull.Value : tenant.MonthlyRent),
                     new SqlParameter("@MoveOutDate", tenant.MoveOutDate ?? (object)DBNull.Value),
-                    new SqlParameter("@City", tenant.City ?? (object)DBNull.Value),
+                    new SqlParameter("@CityId", tenant.CityId == 0 ?(object) DBNull.Value : tenant.BuildingId),
                     new SqlParameter("@CreatedBy", tenant.CreatedBy == 0 ? (object)DBNull.Value : tenant.UnitId),
                     new SqlParameter("@CreatedAt", tenant.CreatedAt ?? (object)DBNull.Value),
                     new SqlParameter("@Notes", tenant.Notes ?? (object)DBNull.Value),
@@ -139,7 +139,7 @@ namespace TRL_API.DAL
                 Email = @Email,
                 MonthlyRent = @MonthlyRent,
                 MoveOutDate = @MoveOutDate,
-                City = @City,
+                CityId = @CityId,
                 UpdatedBy = @UpdatedBy,
                 UpdatedAt = GETUTCDATE(),
                 Notes=@Notes,
@@ -162,7 +162,7 @@ namespace TRL_API.DAL
                     new SqlParameter("@Email", tenant.Email ?? (object)DBNull.Value),
                     new SqlParameter("@MonthlyRent", tenant.MonthlyRent == 0 ? (object)DBNull.Value : tenant.MonthlyRent),
                     new SqlParameter("@MoveOutDate", tenant.MoveOutDate ?? (object)DBNull.Value),
-                    new SqlParameter("@City", tenant.City ?? (object)DBNull.Value),
+                    new SqlParameter("@CityId", tenant.CityId == 0 ? (object)DBNull.Value : tenant.CityId),
                     new SqlParameter("@UpdatedBy", tenant.UpdatedBy == 0 ? (object)DBNull.Value : tenant.UpdatedBy),
                     new SqlParameter("@UpdatedAt", tenant.UpdatedAt ?? (object)DBNull.Value),
                     new SqlParameter("@Notes", tenant.Notes ?? (object)DBNull.Value),

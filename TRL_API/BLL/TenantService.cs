@@ -33,6 +33,11 @@ namespace TRL_API.BLL
             return await _dal.GetUnits(floorId);
         }
 
+        public async Task<DataTable> GetCities()
+        {
+            return await _dal.GetCities();
+        }
+
         public async Task<ApiResponse> SaveTenantAsync(Tenants tenant)
         {
             var (result, error) = await _dal.SaveTenantAsync(tenant);

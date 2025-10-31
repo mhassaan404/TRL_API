@@ -18,7 +18,7 @@ namespace TRL_API.Controllers
             _service = service;
         }
 
-        [HttpGet("Tenants")]
+        [HttpGet("GetTenants")]
         public async Task<IActionResult> GetTenants()
         {
             var data = await _service.GetTenants();
@@ -26,7 +26,7 @@ namespace TRL_API.Controllers
             return Ok(list);
         }
 
-        [HttpGet("Buildings")]
+        [HttpGet("GetBuildings")]
         public async Task<IActionResult> GetBuildings()
         {
             var data = await _service.GetBuildings();
@@ -34,24 +34,32 @@ namespace TRL_API.Controllers
             return Ok(list);
         }
 
-        [HttpGet("Floors")]
-        public async Task<IActionResult> GetFloors(int? buildingId)
+        [HttpGet("GetFloorsByBuilding")]
+        public async Task<IActionResult> GetFloorsByBuilding([FromQuery] int? buildingId)
         {
             var data = await _service.GetFloors(buildingId);
             var list = DataTableHelper.ToDictionaryList(data);
             return Ok(list);
         }
 
-        [HttpGet("Units")]
-        public async Task<IActionResult> GetUnits(int? floorId)
+        [HttpGet("GetUnitsByFloor")]
+        public async Task<IActionResult> GetUnitsByFloor([FromQuery] int? floorId)
         {
             var data = await _service.GetUnits(floorId);
             var list = DataTableHelper.ToDictionaryList(data);
             return Ok(list);
         }
 
-        [HttpPost("SaveTenants")]
-        public async Task<IActionResult> SaveTenants(Tenants tenant)
+        [HttpGet("GetCities")]
+        public async Task<IActionResult> GetCities()
+        {
+            var data = await _service.GetCities();
+            var list = DataTableHelper.ToDictionaryList(data);
+            return Ok(list);
+        }
+
+        [HttpPost("Create")]
+        public async Task<IActionResult> CreateTenant(Tenants tenant)
         {
             //tenant.CreatedBy = User.Identity?.Name?.ToString();
             tenant.CreatedBy = User.GetUserId();
@@ -59,16 +67,16 @@ namespace TRL_API.Controllers
             return Ok(response);
         }
 
-        [HttpPut("UpdateTenants")]
-        public async Task<IActionResult> UpdateTenantAsync(Tenants tenant)
+        [HttpPut("Update")]
+        public async Task<IActionResult> UpdateTenant(Tenants tenant)
         {
             tenant.UpdatedBy = User.GetUserId();
             var response = await _service.UpdateTenantAsync(tenant);
             return Ok(response);
         }
 
-        [HttpDelete("DeleteTenants")]
-        public async Task<IActionResult> DeleteTenantAsync(int tenantId)
+        [HttpDelete("Delete")]
+        public async Task<IActionResult> DeleteTenant([FromQuery] int tenantId)
         {
             var response = await _service.DeleteTenantAsync(tenantId);
             return Ok(response);

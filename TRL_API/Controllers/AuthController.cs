@@ -24,7 +24,7 @@ namespace TRL_API.Controllers
         {
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Username == request.Username);
             if (user == null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
-                return Unauthorized();
+                return Unauthorized(new { message = "Invalid username or password" });
 
             var accessToken = _tokenService.GenerateAccessToken(user);
             var refreshToken = _tokenService.GenerateRefreshToken();
@@ -39,18 +39,37 @@ namespace TRL_API.Controllers
             _context.RefreshTokens.Add(refreshTokenEntity);
             await _context.SaveChangesAsync();
 
-            return Ok(new
+            // ✅ Set HttpOnly cookies
+            Response.Cookies.Append("jwt", accessToken, new CookieOptions
             {
-                AccessToken = accessToken,
-                RefreshToken = refreshToken
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.None,
+                Expires = DateTime.UtcNow.AddHours(1)
             });
+
+            Response.Cookies.Append("refreshToken", refreshToken, new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.None,
+                Expires = DateTime.UtcNow.AddDays(7)
+            });
+
+            return Ok(new { message = "Login successful" });
         }
 
         [HttpPost("refresh")]
-        public async Task<IActionResult> Refresh([FromBody] RefreshRequest request)
+        public async Task<IActionResult> Refresh()
         {
-            var tokenEntity = await _context.RefreshTokens.Include(t => t.User)
-                .FirstOrDefaultAsync(t => t.Token == request.RefreshToken);
+            // ✅ Read refresh token from HttpOnly cookie
+            var refreshToken = Request.Cookies["refreshToken"];
+            if (string.IsNullOrEmpty(refreshToken))
+                return Unauthorized();
+
+            var tokenEntity = await _context.RefreshTokens
+                .Include(t => t.User)
+                .FirstOrDefaultAsync(t => t.Token == refreshToken);
 
             if (tokenEntity == null || tokenEntity.Expires < DateTime.UtcNow)
                 return Unauthorized();
@@ -67,29 +86,48 @@ namespace TRL_API.Controllers
             tokenEntity.Expires = DateTime.UtcNow.AddDays(7);
             await _context.SaveChangesAsync();
 
-            return Ok(new
+            // ✅ Update cookies
+            Response.Cookies.Append("jwt", newAccessToken, new CookieOptions
             {
-                AccessToken = newAccessToken,
-                RefreshToken = newRefreshToken
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.None,
+                Expires = DateTime.UtcNow.AddHours(1)
             });
+
+            Response.Cookies.Append("refreshToken", newRefreshToken, new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.None,
+                Expires = DateTime.UtcNow.AddDays(7)
+            });
+
+            return Ok(new { message = "Token refreshed successfully" });
         }
 
         [HttpPost("logout")]
-        public async Task<IActionResult> Logout([FromBody] RefreshRequest request)
+        public async Task<IActionResult> Logout()
         {
-            // Delete refresh token
-            var tokenEntity = await _context.RefreshTokens.FirstOrDefaultAsync(t => t.Token == request.RefreshToken);
-            if (tokenEntity != null)
+            var refreshToken = Request.Cookies["refreshToken"];
+            if (refreshToken != null)
             {
-                _context.RefreshTokens.Remove(tokenEntity);
-                await _context.SaveChangesAsync();
+                var tokenEntity = await _context.RefreshTokens.FirstOrDefaultAsync(t => t.Token == refreshToken);
+                if (tokenEntity != null)
+                {
+                    _context.RefreshTokens.Remove(tokenEntity);
+                    await _context.SaveChangesAsync();
+                }
             }
 
-            return Ok();
+            // ✅ Clear cookies
+            Response.Cookies.Delete("jwt");
+            Response.Cookies.Delete("refreshToken");
+
+            return Ok(new { message = "Logged out successfully" });
         }
     }
 
     // DTOs
     public record LoginRequest(string Username, string Password);
-    public record RefreshRequest(string RefreshToken);
 }

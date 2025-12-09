@@ -45,7 +45,7 @@ namespace TRL_API.Controllers
                 HttpOnly = true,
                 Secure = true,
                 SameSite = SameSiteMode.None,
-                Expires = DateTime.UtcNow.AddHours(1)
+                Expires = DateTime.UtcNow.AddMinutes(15)
             });
 
             Response.Cookies.Append("refreshToken", refreshToken, new CookieOptions
@@ -53,7 +53,7 @@ namespace TRL_API.Controllers
                 HttpOnly = true,
                 Secure = true,
                 SameSite = SameSiteMode.None,
-                Expires = DateTime.UtcNow.AddDays(7)
+                Expires = DateTime.UtcNow.AddDays(5)
             });
 
             return Ok(new { message = "Login successful" });
@@ -120,11 +120,21 @@ namespace TRL_API.Controllers
                 }
             }
 
-            // ✅ Clear cookies
-            Response.Cookies.Delete("jwt");
-            Response.Cookies.Delete("refreshToken");
+            // Must match original cookie settings
+            var cookieOptions = new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.None,
+                Path = "/"
+            };
+
+            // Delete cookies correctly
+            Response.Cookies.Delete("jwt", cookieOptions);
+            Response.Cookies.Delete("refreshToken", cookieOptions);
 
             return Ok(new { message = "Logged out successfully" });
+
         }
     }
 

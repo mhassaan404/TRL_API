@@ -2,8 +2,8 @@
 {
     public class ApiResponse
     {
-        public bool Success { get; set; }   // true/false instead of Action
-        public string? Message { get; set; } // success message
-        public string? ErrorMessage { get; set; } // optional error
+        public bool IsSuccess { get; set; }
+        public string? Message { get; set; }
+        public string? ErrorMessage { get; set; }
     }
 }

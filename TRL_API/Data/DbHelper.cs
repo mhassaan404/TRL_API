@@ -37,12 +37,7 @@ namespace TRL_API.Data
 
 
 
-        public async Task<int> ExecuteCommandAsync(
-    string query,
-    SqlParameter[]? parameters = null,
-    SqlConnection? conn = null,
-    SqlTransaction? transaction = null,
-    bool isStoredProc = false)
+        public async Task<int> ExecuteCommandAsync(string query, SqlParameter[]? parameters = null, SqlConnection? conn = null, SqlTransaction? transaction = null, bool isStoredProc = false)
         {
             bool ownConnection = conn == null;
             if (ownConnection) conn = new SqlConnection(_connectionString);

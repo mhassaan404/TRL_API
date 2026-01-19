@@ -166,7 +166,8 @@ namespace TRL_API.Controllers
                 });
             }
 
-            int userId = User.GetUserId();
+            //int userId = User.GetUserId();
+            int userId = 1;
             var response = await _service.CreatePaymentAdjustmentAsync(payments, userId);
             return Ok(response);
         }
@@ -174,8 +175,8 @@ namespace TRL_API.Controllers
         [HttpGet("GetRentCollection")]
         public async Task<IActionResult> GetRentCollection()
         {
-            var list = await _service.GetRentCollectionAsync();
-            //var list = DataTableHelper.ToDictionaryList(data, true);
+            var data = await _service.GetRentCollectionAsync();
+            var list = DataTableHelper.ToDictionaryList(data, true);
             return Ok(list);
         }
 

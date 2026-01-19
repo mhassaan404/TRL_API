@@ -295,27 +295,40 @@ namespace TRL_API.BLL
             }
         }
 
+        public async Task<DataTable> GetRentCollectionAsync()
+        {
+            return await _dal.GetRentCollectionAsync();
+        }
+
         //public async Task<InvoiceResponseDto> GetRentCollectionAsync()
         //{
-        //    //return await _dal.GetRentCollectionAsync();
-
         //    DataTable dt = await _dal.GetRentCollectionAsync();
 
         //    var invoices = new List<InvoiceRowDto>();
 
         //    foreach (DataRow row in dt.Rows)
         //    {
+        //        // Core amounts
         //        decimal monthlyRent = Convert.ToDecimal(row["MonthlyRent"]);
-        //        decimal paid = Convert.ToDecimal(row["PaidAmount"] ?? 0);
+        //        decimal paidAmount = Convert.ToDecimal(row["PaidAmount"] ?? 0);
+        //        decimal appliedDiscount = Convert.ToDecimal(row["AppliedDiscount"] ?? 0);
+        //        decimal remainingAmount = Convert.ToDecimal(row["RemainingAmount"] ?? 0);
         //        DateTime dueDate = Convert.ToDateTime(row["DueDate"]);
 
-        //        decimal lateFee = LateFeeCalculator.Calculate(
-        //            0,
-        //            monthlyRent,
-        //            dueDate,
-        //            DateTime.UtcNow
-        //        );
+        //        // Calculate late fee only if there is remaining amount and past due date
+        //        decimal lateFee = 0;
+        //        if (remainingAmount > 0 && DateTime.UtcNow.Date > dueDate.Date)
+        //        {
+        //            // Optionally include any logic for waived late fee
+        //            bool isLateFeeWaived = row.Table.Columns.Contains("IsLateFeeWaived") &&
+        //                                   Convert.ToBoolean(row["IsLateFeeWaived"]);
+        //            if (!isLateFeeWaived)
+        //            {
+        //                lateFee = LateFeeCalculator.Calculate(remainingAmount, monthlyRent, dueDate, DateTime.UtcNow);
+        //            }
+        //        }
 
+        //        // Map invoice row
         //        var invoice = new InvoiceRowDto
         //        {
         //            InvoiceId = row.GetInt("InvoiceId"),
@@ -326,17 +339,16 @@ namespace TRL_API.BLL
         //            UnitNumber = row.GetString("UnitNumber"),
 
         //            InvoiceDate = row.GetDateTime("InvoiceDate"),
-        //            MonthlyRent = row.GetDecimal("MonthlyRent"),
-        //            DueDate = row.GetDateTime("DueDate"),
-        //            RemainingAmount = row.GetDecimal("RemainingAmount"),
+        //            MonthlyRent = monthlyRent,
+        //            DueDate = dueDate,
+        //            RemainingAmount = remainingAmount,
         //            StatusName = row.GetString("StatusName"),
 
-        //            PaidAmount = row.GetDecimal("PaidAmount"),
-        //            AppliedDiscount = row.GetDecimal("AppliedDiscount"),
+        //            PaidAmount = paidAmount,
+        //            AppliedDiscount = appliedDiscount,
         //            PaymentDate = row.GetNullableDateTime("LastPaymentDate"),
 
-        //            // LateFee calculated separately
-        //            LateFee = LateFeeCalculator.Calculate(0, row.GetDecimal("MonthlyRent"), row.GetDateTime("DueDate"), DateTime.UtcNow)
+        //            LateFee = lateFee
         //        };
 
         //        invoices.Add(invoice);
@@ -344,69 +356,9 @@ namespace TRL_API.BLL
 
         //    return new InvoiceResponseDto
         //    {
-        //        Invoices = invoices,
+        //        Invoices = invoices
         //    };
         //}
-
-        public async Task<InvoiceResponseDto> GetRentCollectionAsync()
-        {
-            DataTable dt = await _dal.GetRentCollectionAsync();
-
-            var invoices = new List<InvoiceRowDto>();
-
-            foreach (DataRow row in dt.Rows)
-            {
-                // Core amounts
-                decimal monthlyRent = Convert.ToDecimal(row["MonthlyRent"]);
-                decimal paidAmount = Convert.ToDecimal(row["PaidAmount"] ?? 0);
-                decimal appliedDiscount = Convert.ToDecimal(row["AppliedDiscount"] ?? 0);
-                decimal remainingAmount = Convert.ToDecimal(row["RemainingAmount"] ?? 0);
-                DateTime dueDate = Convert.ToDateTime(row["DueDate"]);
-
-                // Calculate late fee only if there is remaining amount and past due date
-                decimal lateFee = 0;
-                if (remainingAmount > 0 && DateTime.UtcNow.Date > dueDate.Date)
-                {
-                    // Optionally include any logic for waived late fee
-                    bool isLateFeeWaived = row.Table.Columns.Contains("IsLateFeeWaived") &&
-                                           Convert.ToBoolean(row["IsLateFeeWaived"]);
-                    if (!isLateFeeWaived)
-                    {
-                        lateFee = LateFeeCalculator.Calculate(remainingAmount, monthlyRent, dueDate, DateTime.UtcNow);
-                    }
-                }
-
-                // Map invoice row
-                var invoice = new InvoiceRowDto
-                {
-                    InvoiceId = row.GetInt("InvoiceId"),
-                    TenantId = row.GetInt("TenantId"),
-                    TenantName = row.GetString("TenantName"),
-                    BuildingName = row.GetString("BuildingName"),
-                    FloorNumber = row.GetString("FloorNumber"),
-                    UnitNumber = row.GetString("UnitNumber"),
-
-                    InvoiceDate = row.GetDateTime("InvoiceDate"),
-                    MonthlyRent = monthlyRent,
-                    DueDate = dueDate,
-                    RemainingAmount = remainingAmount,
-                    StatusName = row.GetString("StatusName"),
-
-                    PaidAmount = paidAmount,
-                    AppliedDiscount = appliedDiscount,
-                    PaymentDate = row.GetNullableDateTime("LastPaymentDate"),
-
-                    LateFee = lateFee
-                };
-
-                invoices.Add(invoice);
-            }
-
-            return new InvoiceResponseDto
-            {
-                Invoices = invoices
-            };
-        }
 
         public async Task<DataTable> GetPaymentHistoryAsync(int invoiceId)
         {

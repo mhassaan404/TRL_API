@@ -377,15 +377,11 @@ namespace TRL_API.BLL
                 if (rows > 0)
                     return new ApiResponse { IsSuccess = true, Message = "Due dates updated successfully." };
 
-                return new ApiResponse { IsSuccess = false, ErrorMessage = "No invoices were updated." };
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "No matching invoices were found to update." };
             }
-            catch (SqlException ex)
+            catch (SqlException)
             {
-                return new ApiResponse { IsSuccess = false, ErrorMessage = $"Database error: {ex.Message}" };
-            }
-            catch (Exception ex)
-            {
-                return new ApiResponse { IsSuccess = false, ErrorMessage = $"Error: {ex.Message}" };
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "Unable to update due date. Please try again." };
             }
         }
     }

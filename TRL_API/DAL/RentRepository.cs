@@ -71,43 +71,84 @@ namespace TRL_API.DAL
             return await _dbHelper.ExecuteQueryAsync(query, parameters);
         }
 
+        //    public async Task<DataTable> GetInvoiceByIdAsync(int invoiceId)
+        //    {
+        //        string query = @"SELECT
+        //            ri.Id AS InvoiceId,
+        //            p.Id                AS PaymentId,
+        //            ri.TenantId,
+        //            t.Name               AS TenantName,
+        //            b.BuildingName,
+        //            f.FloorNumber,
+        //            u.UnitNumber,
+
+        //            ri.InvoiceDate,
+        //            ri.TotalRent AS MonthlyRent,
+        //            ri.DueDate,
+        //         ri.PendingAmount AS RemainingAmount,
+        //            ri.StatusId,
+        //            s.StatusName,
+
+        //            ISNULL(p.PaymentAmount, 0) AS PaidAmount,
+        //            p.PaymentDate,
+        //            p.PaymentMethod,
+        //            p.Notes,
+        //            p.CreatedAt,
+        //p.DiscountAmount,
+        //p.DiscountPercent,
+        //p.IsLateFeeWaived
+        //        FROM RentInvoices ri
+        //        INNER JOIN Tenants t      ON ri.TenantId = t.TenantId
+        //        INNER JOIN Units u        ON t.UnitId = u.UnitId
+        //        INNER JOIN Floors f       ON u.FloorId = f.FloorId
+        //        INNER JOIN Buildings b    ON u.BuildingId = b.BuildingId
+        //        INNER JOIN StatusList s   ON ri.StatusId = s.StatusId
+        //        LEFT JOIN Payments p      ON ri.Id = p.RentInvoiceId
+        //        WHERE ri.Id = @InvoiceId
+        //        ORDER BY p.PaymentDate DESC;
+        //        ";
+
+        //        var parameters = new[] { new SqlParameter("@InvoiceId", invoiceId) };
+        //        return await _dbHelper.ExecuteQueryAsync(query, parameters);
+        //    }
         public async Task<DataTable> GetInvoiceByIdAsync(int invoiceId)
         {
-            string query = @"SELECT
-                ri.Id AS InvoiceId,
-                p.Id                AS PaymentId,
-                ri.TenantId,
-                t.Name               AS TenantName,
-                b.BuildingName,
-                f.FloorNumber,
-                u.UnitNumber,
+            string query = @"
+        SELECT
+            ri.Id AS InvoiceId,
+            p.Id AS PaymentId,
+            ri.TenantId,
+            t.Name AS TenantName,
+            b.BuildingName,
+            f.FloorNumber,
+            u.UnitNumber,
+            ri.InvoiceDate,
+            ri.TotalRent AS MonthlyRent,
+            ri.DueDate,
             
-                ri.InvoiceDate,
-                ri.TotalRent AS MonthlyRent,
-                ri.DueDate,
-	            ri.PendingAmount AS RemainingAmount,
-                ri.StatusId,
-                s.StatusName,
+            (ri.TotalRent - ISNULL(SUM(p.PaymentAmount) OVER (PARTITION BY ri.Id), 0) 
+                           - ISNULL(SUM(p.DiscountAmount) OVER (PARTITION BY ri.Id), 0)) AS RemainingAmount,
             
-                ISNULL(p.PaymentAmount, 0) AS PaidAmount,
-                p.PaymentDate,
-                p.PaymentMethod,
-                p.Notes,
-                p.CreatedAt,
-				p.DiscountAmount,
-				p.DiscountPercent,
-				p.IsLateFeeWaived
-            FROM RentInvoices ri
-            INNER JOIN Tenants t      ON ri.TenantId = t.TenantId
-            INNER JOIN Units u        ON t.UnitId = u.UnitId
-            INNER JOIN Floors f       ON u.FloorId = f.FloorId
-            INNER JOIN Buildings b    ON u.BuildingId = b.BuildingId
-            INNER JOIN StatusList s   ON ri.StatusId = s.StatusId
-            LEFT JOIN Payments p      ON ri.Id = p.RentInvoiceId
-            WHERE ri.Id = @InvoiceId
-            ORDER BY p.PaymentDate DESC;
-            ";
-
+            ri.StatusId,
+            s.StatusName,
+            ISNULL(p.PaymentAmount, 0) AS PaidAmount,
+            p.PaymentDate,
+            p.PaymentMethod,
+            p.Notes,
+            p.CreatedAt,
+            p.DiscountAmount,
+            p.DiscountPercent,
+            p.IsLateFeeWaived
+        FROM RentInvoices ri
+        INNER JOIN Tenants t ON ri.TenantId = t.TenantId
+        INNER JOIN Units u ON t.UnitId = u.UnitId
+        INNER JOIN Floors f ON u.FloorId = f.FloorId
+        INNER JOIN Buildings b ON u.BuildingId = b.BuildingId
+        INNER JOIN StatusList s ON ri.StatusId = s.StatusId
+        LEFT JOIN Payments p ON ri.Id = p.RentInvoiceId
+        WHERE ri.Id = @InvoiceId
+        ORDER BY p.PaymentDate DESC;
+    ";
             var parameters = new[] { new SqlParameter("@InvoiceId", invoiceId) };
             return await _dbHelper.ExecuteQueryAsync(query, parameters);
         }
@@ -118,10 +159,17 @@ namespace TRL_API.DAL
         //        p.PaymentDate,
         //        ri.TotalRent AS MonthlyRent,
         //        ISNULL(p.PaymentAmount, 0) AS PaidAmount,
-        //        -- Cumulative sum of payments + discounts to calculate remaining
         //        ri.TotalRent - ISNULL(SUM(p.PaymentAmount + p.DiscountAmount)
         //                              OVER (PARTITION BY ri.Id ORDER BY p.PaymentDate, p.Id
         //                                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), 0) AS RemainingAmount,
+
+        //        -- NEW: Cumulative paid up to this payment
+        //        SUM(ISNULL(p.PaymentAmount, 0)) OVER (
+        //            PARTITION BY ri.Id 
+        //            ORDER BY p.PaymentDate, p.Id 
+        //            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        //        ) AS TotalPaid,
+
         //        ISNULL(p.DiscountAmount, 0) AS DiscountAmount,
         //        ISNULL(p.DiscountPercent, 0) AS DiscountPercent,
         //        ISNULL(p.IsLateFeeWaived, 0) AS waveLateFee,
@@ -136,35 +184,36 @@ namespace TRL_API.DAL
         //    var parameters = new[] { new SqlParameter("@InvoiceId", invoiceId) };
         //    return await _dbHelper.ExecuteQueryAsync(query, parameters);
         //}
-
         public async Task<DataTable> GetPaymentHistoryByIdAsync(int invoiceId)
         {
-            string query = @"SELECT
-                p.PaymentDate,
-                ri.TotalRent AS MonthlyRent,
-                ISNULL(p.PaymentAmount, 0) AS PaidAmount,
-                ri.TotalRent - ISNULL(SUM(p.PaymentAmount + p.DiscountAmount)
-                                      OVER (PARTITION BY ri.Id ORDER BY p.PaymentDate, p.Id
-                                            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), 0) AS RemainingAmount,
-                
-                -- NEW: Cumulative paid up to this payment
-                SUM(ISNULL(p.PaymentAmount, 0)) OVER (
-                    PARTITION BY ri.Id 
-                    ORDER BY p.PaymentDate, p.Id 
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                ) AS TotalPaid,
-                
-                ISNULL(p.DiscountAmount, 0) AS DiscountAmount,
-                ISNULL(p.DiscountPercent, 0) AS DiscountPercent,
-                ISNULL(p.IsLateFeeWaived, 0) AS waveLateFee,
-                ISNULL(p.PaymentMethod, '') AS PaymentMethod,
-                ISNULL(p.Notes, '') AS Notes
-            FROM Payments p
-            INNER JOIN RentInvoices ri ON p.RentInvoiceId = ri.Id
-            WHERE ri.Id = @invoiceId
-            ORDER BY p.PaymentDate DESC, p.Id DESC;
+            string query = @"
+                SELECT
+                    p.PaymentDate,
+                    ri.TotalRent AS MonthlyRent,
+                    ISNULL(p.PaymentAmount, 0) AS PaidAmount,
+                    
+                    (ri.TotalRent - ISNULL(SUM(p.PaymentAmount + p.DiscountAmount) 
+                                            OVER (PARTITION BY ri.Id 
+                                                  ORDER BY p.PaymentDate, p.Id 
+                                                  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), 0))
+                        AS RemainingAmount,
+                    
+                    SUM(ISNULL(p.PaymentAmount, 0)) OVER (
+                        PARTITION BY ri.Id
+                        ORDER BY p.PaymentDate, p.Id
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                    ) AS TotalPaid,
+                    
+                    ISNULL(p.DiscountAmount, 0) AS DiscountAmount,
+                    ISNULL(p.DiscountPercent, 0) AS DiscountPercent,
+                    ISNULL(p.IsLateFeeWaived, 0) AS waveLateFee,
+                    ISNULL(p.PaymentMethod, '') AS PaymentMethod,
+                    ISNULL(p.Notes, '') AS Notes
+                FROM Payments p
+                INNER JOIN RentInvoices ri ON p.RentInvoiceId = ri.Id
+                WHERE ri.Id = @InvoiceId
+                ORDER BY p.PaymentDate DESC, p.Id DESC;
             ";
-
             var parameters = new[] { new SqlParameter("@InvoiceId", invoiceId) };
             return await _dbHelper.ExecuteQueryAsync(query, parameters);
         }
@@ -191,11 +240,64 @@ namespace TRL_API.DAL
         //    return await _dbHelper.ExecuteQueryAsync(query, parameters);
         //}
 
+        //public async Task<DataTable> GetUnpaidInvoiceByTenant(int tenantId)
+        //{
+        //    string query = @"
+        //                WITH PaymentSums AS (
+        //        SELECT 
+        //            ri.Id AS InvoiceId,
+        //            ISNULL(SUM(p.PaymentAmount), 0) AS Paid,
+        //            ISNULL(SUM(p.DiscountAmount), 0) AS DiscountAmount,
+        //            ISNULL(MAX(p.DiscountPercent), 0) AS DiscountPercent,
+        //            MAX(CASE WHEN p.IsLateFeeWaived = 1 THEN 1 ELSE 0 END) AS WaveLate
+        //        FROM RentInvoices ri
+        //        LEFT JOIN Payments p ON ri.Id = p.RentInvoiceId
+        //        GROUP BY ri.Id
+        //    ),
+        //    InvoiceWithTotals AS (
+        //        SELECT
+        //            ri.Id AS InvoiceId,
+        //            ri.TenantId,
+        //            t.Name AS TenantName,
+        //            ri.InvoiceDate,
+        //            ri.DueDate,
+        //            ri.TotalRent AS MonthlyRent,
+        //            ps.Paid as PaidAmount,
+        //            ri.PendingAmount AS RemainingAmount,
+        //            CASE 
+        //                WHEN ri.DueDate < GETDATE() AND ps.WaveLate = 0
+        //                THEN ROUND(ri.TotalRent * 0.05, 0)
+        //                ELSE 0
+        //            END AS LateFee,
+        //            ps.WaveLate,
+        //            ps.DiscountAmount,
+        //            ps.DiscountPercent,
+        //            0 AS PayAmount,          -- placeholder for frontend input
+        //            NULL AS PaymentDate,     -- placeholder
+        //            NULL AS Method,          -- placeholder
+        //            '' AS Notes,             -- placeholder
+        //            SUM(ri.TotalRent - ps.Paid) OVER(PARTITION BY ri.TenantId ORDER BY ri.DueDate ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS PreviousBalance,
+        //            SUM(CASE WHEN ri.DueDate < GETDATE() AND ps.WaveLate = 0 THEN ROUND(ri.TotalRent * 0.05, 0) ELSE 0 END) OVER(PARTITION BY ri.TenantId) AS   TotalLateFeePerTenant,
+        //            SUM(ps.Paid) OVER(PARTITION BY ri.TenantId) AS TotalPaidPerTenant
+        //        FROM RentInvoices ri
+        //        LEFT JOIN PaymentSums ps ON ri.Id = ps.InvoiceId
+        //        LEFT JOIN Tenants t ON ri.TenantId = t.TenantId
+        //        WHERE ri.StatusId IN (2, 3, 4, 8)  -- (unpaid, pending, inprocess, partial)
+        //    	AND ri.TenantId = @TenantId
+        //    )
+        //    SELECT *
+        //    FROM InvoiceWithTotals
+        //    ORDER BY InvoiceDate desc;
+        //    ";
+
+        //    var parameters = new[] { new SqlParameter("@TenantId", tenantId) };
+        //    return await _dbHelper.ExecuteQueryAsync(query, parameters);
+        //}
         public async Task<DataTable> GetUnpaidInvoiceByTenant(int tenantId)
         {
             string query = @"
-                        WITH PaymentSums AS (
-                SELECT 
+            WITH PaymentSums AS (
+                SELECT
                     ri.Id AS InvoiceId,
                     ISNULL(SUM(p.PaymentAmount), 0) AS Paid,
                     ISNULL(SUM(p.DiscountAmount), 0) AS DiscountAmount,
@@ -213,9 +315,9 @@ namespace TRL_API.DAL
                     ri.InvoiceDate,
                     ri.DueDate,
                     ri.TotalRent AS MonthlyRent,
-                    ps.Paid as PaidAmount,
-                    ri.PendingAmount AS RemainingAmount,
-                    CASE 
+                    ps.Paid AS PaidAmount,
+                    (ri.TotalRent - ISNULL(ps.Paid, 0) - ISNULL(ps.DiscountAmount, 0)) AS RemainingAmount,
+                    CASE
                         WHEN ri.DueDate < GETDATE() AND ps.WaveLate = 0
                         THEN ROUND(ri.TotalRent * 0.05, 0)
                         ELSE 0
@@ -223,24 +325,27 @@ namespace TRL_API.DAL
                     ps.WaveLate,
                     ps.DiscountAmount,
                     ps.DiscountPercent,
-                    0 AS PayAmount,          -- placeholder for frontend input
-                    NULL AS PaymentDate,     -- placeholder
-                    NULL AS Method,          -- placeholder
-                    '' AS Notes,             -- placeholder
-                    SUM(ri.TotalRent - ps.Paid) OVER(PARTITION BY ri.TenantId ORDER BY ri.DueDate ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS PreviousBalance,
-                    SUM(CASE WHEN ri.DueDate < GETDATE() AND ps.WaveLate = 0 THEN ROUND(ri.TotalRent * 0.05, 0) ELSE 0 END) OVER(PARTITION BY ri.TenantId) AS   TotalLateFeePerTenant,
+                    0 AS PayAmount,           -- placeholder
+                    NULL AS PaymentDate,      -- placeholder
+                    NULL AS Method,           -- placeholder
+                    '' AS Notes,              -- placeholder
+                    SUM(ri.TotalRent - ISNULL(ps.Paid, 0) - ISNULL(ps.DiscountAmount, 0)) 
+                        OVER(PARTITION BY ri.TenantId ORDER BY ri.DueDate 
+                             ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS PreviousBalance,
+                    SUM(CASE WHEN ri.DueDate < GETDATE() AND ps.WaveLate = 0 
+                             THEN ROUND(ri.TotalRent * 0.05, 0) ELSE 0 END) 
+                        OVER(PARTITION BY ri.TenantId) AS TotalLateFeePerTenant,
                     SUM(ps.Paid) OVER(PARTITION BY ri.TenantId) AS TotalPaidPerTenant
                 FROM RentInvoices ri
                 LEFT JOIN PaymentSums ps ON ri.Id = ps.InvoiceId
                 LEFT JOIN Tenants t ON ri.TenantId = t.TenantId
-                WHERE ri.StatusId IN (2, 3, 4, 8)  -- (unpaid, pending, inprocess, partial)
-            	AND ri.TenantId = @TenantId
+                WHERE ri.StatusId IN (2, 3, 4, 8)   -- unpaid, pending, inprocess, partial
+                  AND ri.TenantId = @TenantId
             )
             SELECT *
             FROM InvoiceWithTotals
-            ORDER BY InvoiceDate desc;
+            ORDER BY InvoiceDate DESC;
             ";
-
             var parameters = new[] { new SqlParameter("@TenantId", tenantId) };
             return await _dbHelper.ExecuteQueryAsync(query, parameters);
         }
@@ -501,59 +606,57 @@ namespace TRL_API.DAL
         //    ";
         //    return await _dbHelper.ExecuteQueryAsync(query);
         //}
-
         public async Task<DataTable> GetRentCollectionAsync()
         {
             string query = @"
-            SELECT
-                ri.Id AS InvoiceId,
-                t.TenantId,
-                t.Name AS TenantName,
-                b.BuildingName,
-                f.FloorNumber,
-                u.UnitNumber,
-                ri.InvoiceDate,
-                ISNULL(ri.TotalRent, 0) AS MonthlyRent,
-                ri.DueDate,
-                
-                -- Correct & consistent RemainingAmount (same as history query)
-                ISNULL(ri.TotalRent - SUM(ISNULL(p.PaymentAmount, 0) + ISNULL(p.DiscountAmount, 0)), 0) 
-                    AS RemainingAmount,
-                
-                -- Late Fee: Simple, consistent, and safe (no scalar function needed)
-                CASE 
-                    WHEN ISNULL(ri.TotalRent - SUM(ISNULL(p.PaymentAmount, 0) + ISNULL(p.DiscountAmount, 0)), 0) > 0
-                         AND ri.DueDate < CAST(GETUTCDATE() AS DATE)
-                         AND MAX(CASE WHEN ISNULL(p.IsLateFeeWaived, 0) = 1 THEN 1 ELSE 0 END) = 0  -- No waiver in any payment
-                    THEN ROUND(
-                             (ISNULL(ri.TotalRent - SUM(ISNULL(p.PaymentAmount, 0) + ISNULL(p.DiscountAmount, 0)), 0)) * 0.05, 
-                             0
-                         )
-                    ELSE 0
-                END AS LateFee,
-                
-                s.StatusName,
-                SUM(ISNULL(p.PaymentAmount, 0)) AS PaidAmount,
-                SUM(ISNULL(p.DiscountAmount, 0)) AS AppliedDiscount,
-                MAX(p.PaymentDate) AS LastPaymentDate
+        SELECT
+            ri.Id AS InvoiceId,
+            t.TenantId,
+            t.Name AS TenantName,
+            b.BuildingName,
+            f.FloorNumber,
+            u.UnitNumber,
+            ri.InvoiceDate,
+            ISNULL(ri.TotalRent, 0) AS MonthlyRent,
+            ri.DueDate,
             
-            FROM RentInvoices ri
-            INNER JOIN Tenants t ON ri.TenantId = t.TenantId
-            INNER JOIN Units u ON t.UnitId = u.UnitId
-            INNER JOIN Floors f ON u.FloorId = f.FloorId
-            INNER JOIN Buildings b ON u.BuildingId = b.BuildingId
-            INNER JOIN StatusList s ON ri.StatusId = s.StatusId
-            LEFT JOIN Payments p ON ri.Id = p.RentInvoiceId
+            ISNULL(ri.TotalRent - SUM(ISNULL(p.PaymentAmount, 0)) - SUM(ISNULL(p.DiscountAmount, 0)), 0)
+                AS RemainingAmount,
             
-            WHERE ri.StatusId IN (2, 8, 9)
+            CASE
+                WHEN (ri.TotalRent - SUM(ISNULL(p.PaymentAmount, 0)) - SUM(ISNULL(p.DiscountAmount, 0))) > 0
+                     AND ri.DueDate < CAST(GETUTCDATE() AS DATE)
+                     AND NOT EXISTS (
+                         SELECT 1 FROM Payments p2 
+                         WHERE p2.RentInvoiceId = ri.Id 
+                           AND ISNULL(p2.IsLateFeeWaived, 0) = 1
+                     )
+                THEN dbo.CalculateLateFee(
+                         (ri.TotalRent - SUM(ISNULL(p.PaymentAmount, 0)) - SUM(ISNULL(p.DiscountAmount, 0))),
+                         ri.TotalRent,
+                         ri.DueDate,
+                         GETUTCDATE()
+                     )
+                ELSE 0
+            END AS LateFee,
             
-            GROUP BY
-                ri.Id, t.TenantId, t.Name, b.BuildingName, f.FloorNumber, u.UnitNumber,
-                ri.InvoiceDate, ri.TotalRent, ri.DueDate, s.StatusName
-            
-            ORDER BY ri.InvoiceDate DESC, t.Name;
-        ";
-
+            s.StatusName,
+            SUM(ISNULL(p.PaymentAmount, 0)) AS PaidAmount,
+            SUM(ISNULL(p.DiscountAmount, 0)) AS AppliedDiscount,
+            MAX(p.PaymentDate) AS LastPaymentDate
+        FROM RentInvoices ri
+        INNER JOIN Tenants t ON ri.TenantId = t.TenantId
+        INNER JOIN Units u ON t.UnitId = u.UnitId
+        INNER JOIN Floors f ON u.FloorId = f.FloorId
+        INNER JOIN Buildings b ON u.BuildingId = b.BuildingId
+        INNER JOIN StatusList s ON ri.StatusId = s.StatusId
+        LEFT JOIN Payments p ON ri.Id = p.RentInvoiceId
+        WHERE ri.StatusId IN (2, 8, 9)
+        GROUP BY
+            ri.Id, t.TenantId, t.Name, b.BuildingName, f.FloorNumber, u.UnitNumber,
+            ri.InvoiceDate, ri.TotalRent, ri.DueDate, s.StatusName
+        ORDER BY ri.InvoiceDate DESC, t.Name;
+    ";
             return await _dbHelper.ExecuteQueryAsync(query);
         }
 
@@ -571,9 +674,6 @@ namespace TRL_API.DAL
 
         public async Task<int> BulkUpdateDueDateAsync(List<int> invoiceIds, DateTime newDueDate)
         {
-            if (invoiceIds == null || invoiceIds.Count == 0)
-                throw new ArgumentException("InvoiceIds cannot be empty.", nameof(invoiceIds));
-
             // Build parameterized IN clause
             var inParams = invoiceIds.Select((id, index) => $"@Id{index}").ToArray();
             string query = $@"

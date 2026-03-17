@@ -34,7 +34,8 @@ namespace TRL_API.Controllers
             {
                 Token = refreshToken,
                 Expires = DateTime.UtcNow.AddDays(7),
-                UserId = user.UserId
+                UserId = user.UserId,
+                CreatedAt = DateTime.UtcNow
             };
             _context.RefreshTokens.Add(refreshTokenEntity);
             await _context.SaveChangesAsync();
@@ -56,8 +57,79 @@ namespace TRL_API.Controllers
                 Expires = DateTime.UtcNow.AddDays(5)
             });
 
-            return Ok(new { message = "Login successful" });
+            return Ok(new
+            {
+                success = true,
+                message = "Login successful",
+            });
         }
+
+        //[HttpPost("login")]
+        //public async Task<IActionResult> Login([FromBody] LoginRequest request)
+        //{
+        //    // Input validation
+        //    if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
+        //    {
+        //        return BadRequest(new { message = "Username and password are required" });
+        //    }
+
+        //    var user = await _context.Users
+        //        .FirstOrDefaultAsync(u => u.Username == request.Username);
+
+        //    if (user == null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+        //    {
+        //        return Unauthorized(new
+        //        {
+        //            success = false,
+        //            message = "Invalid username or password"
+        //        });
+        //    }
+
+        //    // Generate tokens
+        //    var accessToken = _tokenService.GenerateAccessToken(user);
+        //    var refreshToken = _tokenService.GenerateRefreshToken();
+
+        //    // Save new refresh token
+        //    var refreshTokenEntity = new RefreshToken
+        //    {
+        //        Token = refreshToken,
+        //        Expires = DateTime.UtcNow.AddDays(7),
+        //        UserId = user.UserId,
+        //        CreatedAt = DateTime.UtcNow
+        //    };
+        //    _context.RefreshTokens.Add(refreshTokenEntity);
+
+        //    await _context.SaveChangesAsync();
+
+        //    // Set HttpOnly cookies
+        //    Response.Cookies.Append("accessToken", accessToken, new CookieOptions
+        //    {
+        //        HttpOnly = true,
+        //        Secure = true,
+        //        SameSite = SameSiteMode.Strict, // Better than None if possible
+        //        Expires = DateTime.UtcNow.AddMinutes(15)
+        //    });
+
+        //    Response.Cookies.Append("refreshToken", refreshToken, new CookieOptions
+        //    {
+        //        HttpOnly = true,
+        //        Secure = true,
+        //        SameSite = SameSiteMode.Strict,
+        //        Expires = DateTime.UtcNow.AddDays(7)
+        //    });
+
+        //    // Return standardized success response with user info
+        //    return Ok(new
+        //    {
+        //        success = true,
+        //        message = "Login successful",
+        //        //user = new
+        //        //{
+        //        //    id = user.UserId,
+        //        //    username = user.Username,
+        //        //}
+        //    });
+        //}
 
         [HttpPost("refresh")]
         public async Task<IActionResult> Refresh()

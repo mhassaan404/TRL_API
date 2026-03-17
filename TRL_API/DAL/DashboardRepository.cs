@@ -57,31 +57,36 @@ namespace TRL_API.DAL
         public async Task<DataTable> GetDashboardData()
         {
             string query = @"
-                        WITH Months AS (
-                SELECT FORMAT(DATEADD(MONTH, -0, DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)), 'yyyy-MM') AS MonthYear
-                UNION ALL
-                SELECT FORMAT(DATEADD(MONTH, -1, DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)), 'yyyy-MM')
-                UNION ALL
-                SELECT FORMAT(DATEADD(MONTH, -2, DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)), 'yyyy-MM')
-                UNION ALL
-                SELECT FORMAT(DATEADD(MONTH, -3, DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)), 'yyyy-MM')
-                UNION ALL
-                SELECT FORMAT(DATEADD(MONTH, -4, DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)), 'yyyy-MM')
-                UNION ALL
-                SELECT FORMAT(DATEADD(MONTH, -5, DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)), 'yyyy-MM')
-                UNION ALL
-                SELECT FORMAT(DATEADD(MONTH, -6, DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)), 'yyyy-MM')
+            ;WITH Months AS
+            (
+                SELECT 
+                    DATEADD(MONTH, -v.number, DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)) AS MonthStart
+                FROM master..spt_values v
+                WHERE v.type = 'P' AND v.number BETWEEN 0 AND 6
             )
+            
             SELECT 
-                M.MonthYear,
-                ISNULL(COUNT(DISTINCT T.TenantId), 0) AS TotalTenants,
-                ISNULL(SUM(R.TotalRent), 0) AS TotalRentDue,
-                ISNULL(SUM(CASE WHEN R.Status = 'Paid' THEN R.PaidAmount ELSE 0 END), 0) AS CollectedAmount,
-                ISNULL(SUM(CASE WHEN R.Status <> 'Paid' THEN R.PendingAmount ELSE 0 END), 0) AS PendingAmount
+                FORMAT(M.MonthStart, 'yyyy-MM') AS MonthYear,
+            
+                COUNT(DISTINCT RI.TenantId) AS TotalTenants,
+            
+                ISNULL(SUM(RI.TotalRent), 0) AS TotalRentDue,
+            
+                ISNULL(SUM(P.PaymentAmount), 0) AS CollectedAmount,
+            
+                ISNULL(SUM(RI.TotalRent) - SUM(ISNULL(P.PaymentAmount,0)), 0) AS PendingAmount
+            
             FROM Months M
-            LEFT JOIN RentInvoices R ON FORMAT(CONVERT(date, R.[Month] + '-01'), 'yyyy-MM') = M.MonthYear
-            LEFT JOIN Tenants T ON T.TenantId = R.TenantId
-            GROUP BY M.MonthYear;
+            
+            LEFT JOIN RentInvoices RI 
+                ON YEAR(RI.InvoiceDate) = YEAR(M.MonthStart)
+                AND MONTH(RI.InvoiceDate) = MONTH(M.MonthStart)
+            
+            LEFT JOIN Payments P 
+                ON P.RentInvoiceId = RI.Id
+            
+            GROUP BY M.MonthStart
+            ORDER BY M.MonthStart;
             ";
 
             var dt = await _dbHelper.ExecuteQueryAsync(query);

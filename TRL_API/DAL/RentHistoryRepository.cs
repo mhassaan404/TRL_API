@@ -11,6 +11,7 @@ namespace TRL_API.DAL
         {
             _dbHelper = dbHelper;
         }
+
         public async Task<DataTable> GetHistoryAsync()
         {
             string query = @"

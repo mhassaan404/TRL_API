@@ -677,9 +677,9 @@ namespace TRL_API.DAL
             // Build parameterized IN clause
             var inParams = invoiceIds.Select((id, index) => $"@Id{index}").ToArray();
             string query = $@"
-        UPDATE RentInvoices
-        SET DueDate = @NewDueDate
-        WHERE Id IN ({string.Join(", ", inParams)});";
+                UPDATE RentInvoices
+                SET DueDate = @NewDueDate
+                WHERE Id IN ({string.Join(", ", inParams)});";
 
             var parameters = invoiceIds
                 .Select((id, index) => new SqlParameter($"@Id{index}", id))

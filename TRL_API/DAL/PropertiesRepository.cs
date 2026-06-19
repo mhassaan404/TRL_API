@@ -1,173 +1,4 @@
-﻿//using Microsoft.Data.SqlClient;
-//using System.Data;
-//using System.Net;
-//using TRL_API.Data;
-//using TRL_API.Models;
-
-//namespace TRL_API.DAL
-//{
-//    public class PropertiesRepository
-//    {
-//        private readonly DbHelper _dbHelper;
-
-//        public PropertiesRepository(DbHelper dbHelper)
-//        {
-//            _dbHelper = dbHelper;
-//        }
-
-//        public async Task<DataTable> GetProperties()
-//        {
-//            string query = @"SELECT 
-//                u.UnitId,
-//                b.BuildingName,
-//                f.FloorNumber,
-//                u.UnitNumber,
-//                u.BaseRent,
-//                bt.Name AS PropertyType,
-//                c.Name AS CityName,
-//                us.Name AS Status,
-//                u.Note
-//            FROM Buildings b
-//            INNER JOIN Floors f ON f.BuildingId = b.BuildingId
-//            INNER JOIN Units u ON u.FloorId = f.FloorId
-//            INNER JOIN BuildingType bt ON b.TypeId = bt.Id
-//            INNER JOIN City c ON b.CityId = c.Id
-//            INNER JOIN UnitStatus us ON u.StatusId = us.Id
-//            WHERE u.IsActive = 1
-//            ORDER BY b.BuildingName, f.FloorNumber, u.UnitNumber;";
-//            var dt = await _dbHelper.ExecuteQueryAsync(query);
-//            return dt;
-//        }
-
-//        public async Task<DataTable> GetBuildings()
-//        {
-//            string query = @"SELECT 
-//                BuildingId,
-//                BuildingName
-//            FROM Buildings
-//            WHERE IsActive = 1
-//            ORDER BY BuildingName";
-//            var dt = await _dbHelper.ExecuteQueryAsync(query);
-//            return dt;
-//        }
-
-//        public async Task<DataTable> GetFloorsbyBuilding(int buildingId)
-//        {
-//            string query = @"SELECT 
-//                FloorId,
-//                FloorNumber
-//            FROM Floors
-//            WHERE BuildingId = @BuildingId
-//            AND IsActive = 1";
-
-//            var parameters = new[] { new SqlParameter("@BuildingId", buildingId) };
-//            return await _dbHelper.ExecuteQueryAsync(query, parameters);
-//        }
-
-//        public async Task<DataTable> SaveBuilding(string BuildingName, int CityId, int TypeId, string Address)
-//        {
-//            string query = @"INSERT INTO Buildings (BuildingName, CityId, TypeId, Address, IsActive)
-//            VALUES (@BuildingName, @CityId, @TypeId, @Address, 1)";
-
-//            var parameters = new[]
-//            {
-//                new SqlParameter("@BuildingName", BuildingName),
-//                new SqlParameter("@CityId", CityId),
-//                new SqlParameter("@TypeId", TypeId),
-//                new SqlParameter("@Address", Address)
-//            };
-//            return await _dbHelper.ExecuteQueryAsync(query, parameters);
-//        }
-
-//        public async Task<DataTable> SaveFloor(int BuildingId, int FloorNumber)
-//        {
-//            string query = @"INSERT INTO Buildings (BuildingId, FloorNumber, IsActive)
-//            VALUES (@BuildingId, @FloorNumber, 1)";
-
-//            var parameters = new[]
-//            {
-//                new SqlParameter("@BuildingId", BuildingId),
-//                new SqlParameter("@FloorNumber", FloorNumber)
-//            };
-//            return await _dbHelper.ExecuteQueryAsync(query, parameters);
-//        }
-
-//        public async Task<DataTable> SaveUnit(int FloorId, int BuildingId, int UnitNumber, int StatusId, double BaseRent, string Note)
-//        {
-//            string query = @"INSERT INTO Units (
-//                FloorId,
-//                BuildingId,
-//                UnitNumber,
-//                StatusId,
-//                BaseRent,
-//                Note,
-//                IsActive
-//            )
-//            VALUES (
-//                @FloorId,
-//                @BuildingId,
-//                @UnitNumber,
-//                @StatusId,
-//                @BaseRent,
-//                @Note,
-//                1
-//            )";
-
-//            var parameters = new[]
-//            {
-//                new SqlParameter("@FloorId", FloorId),
-//                new SqlParameter("@BuildingId", BuildingId),
-//                new SqlParameter("@UnitNumber", UnitNumber),
-//                new SqlParameter("@StatusId", StatusId),
-//                new SqlParameter("@BaseRent", BaseRent),
-//                new SqlParameter("@Note", Note)
-//            };
-//            return await _dbHelper.ExecuteQueryAsync(query, parameters);
-//        }
-
-//        public async Task<DataTable> UpdateUnit(int FloorId, int BuildingId, int UnitNumber, int StatusId, double BaseRent, string Note)
-//        {
-//            string query = @"UPDATE Units
-//            SET 
-//                FloorId = @FloorId,
-//                BuildingId = @BuildingId,
-//                UnitNumber = @UnitNumber,
-//                StatusId = @StatusId,
-//                BaseRent = @BaseRent,
-//                Note = @Note
-//            WHERE UnitId = @UnitId";
-
-//            var parameters = new[]
-//            {
-//                new SqlParameter("@FloorId", FloorId),
-//                new SqlParameter("@BuildingId", BuildingId),
-//                new SqlParameter("@UnitNumber", UnitNumber),
-//                new SqlParameter("@StatusId", StatusId),
-//                new SqlParameter("@BaseRent", BaseRent),
-//                new SqlParameter("@Note", Note)
-//            };
-//            return await _dbHelper.ExecuteQueryAsync(query, parameters);
-//        }
-
-//        public async Task<DataTable> DeleteUnit(int UnitNumber)
-//        {
-//            string query = @"UPDATE Units
-//            SET IsActive = 0
-//            WHERE UnitId = @UnitId";
-
-//            var parameters = new[]
-//            {
-//                new SqlParameter("@UnitNumber", UnitNumber)
-//            };
-//            return await _dbHelper.ExecuteQueryAsync(query, parameters);
-//        }
-//    }
-//}
-
-
-
-
-using Microsoft.Data.SqlClient;
+﻿using Microsoft.Data.SqlClient;
 using System.Data;
 using TRL_API.Data;
 
@@ -185,6 +16,7 @@ namespace TRL_API.DAL
         public async Task<DataTable> GetProperties()
         {
             string query = @"SELECT 
+                u.BuildingId,
                 u.UnitId,
                 b.BuildingName,
                 f.FloorNumber,
@@ -209,11 +41,12 @@ namespace TRL_API.DAL
         public async Task<DataTable> GetBuildings()
         {
             string query = @"SELECT 
-                BuildingId,
-                BuildingName
-            FROM Buildings
-            WHERE IsActive = 1
-            ORDER BY BuildingName";
+                b.BuildingId, b.BuildingName, b.Address, c.Name AS CityName, bt.Name AS Type
+            FROM Buildings b
+            JOIN City c ON b.CityId = c.Id
+            JOIN BuildingType bt ON b.TypeId = bt.Id
+            WHERE b.IsActive = 1
+            ORDER BY b.BuildingName";
 
             return await _dbHelper.ExecuteQueryAsync(query);
         }
@@ -226,6 +59,37 @@ namespace TRL_API.DAL
             FROM Floors
             WHERE BuildingId = @BuildingId
             AND IsActive = 1";
+
+            var parameters = new[]
+            {
+                new SqlParameter("@BuildingId", buildingId)
+            };
+
+            return await _dbHelper.ExecuteQueryAsync(query, parameters);
+        }
+
+        public async Task<DataTable> GetUnitsByBuilding(int buildingId)
+        {
+            string query = @"SELECT 
+                u.UnitId,
+                u.UnitNumber,
+                u.BaseRent,
+                f.FloorNumber,
+                bt.Name AS PropertyType,
+                us.Name AS Status,
+                u.Note,
+                b.BuildingId,
+                b.BuildingName,
+                c.Name AS CityName
+            FROM Units u
+            JOIN Floors f ON u.FloorId = f.FloorId
+            JOIN Buildings b ON f.BuildingId = b.BuildingId
+            JOIN BuildingType bt ON b.TypeId = bt.Id
+            JOIN UnitStatus us ON u.StatusId = us.Id
+            JOIN City c ON b.CityId = c.Id
+            WHERE b.BuildingId = @BuildingId
+            AND u.IsActive = 1
+            ORDER BY f.FloorNumber, u.UnitNumber;";
 
             var parameters = new[]
             {

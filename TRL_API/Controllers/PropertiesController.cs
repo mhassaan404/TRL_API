@@ -1,45 +1,4 @@
-﻿//using Microsoft.AspNetCore.Authorization;
-//using Microsoft.AspNetCore.Http;
-//using Microsoft.AspNetCore.Mvc;
-//using TRL_API.BLL;
-//using TRL_API.Helpers;
-
-//namespace TRL_API.Controllers
-//{
-//    [Authorize(Roles = "Admin,Tenant")]
-//    [Route("api/[controller]")]
-//    [ApiController]
-//    public class PropertiesController : ControllerBase
-//    {
-//        private readonly PropertiesService _service;
-//        public PropertiesController(PropertiesService service)
-//        {
-//            _service = service;
-//        }
-
-//        [HttpGet("GetProperties")]
-//        public async Task<IActionResult> GetProperties()
-//        {
-//            var data = await _service.GetProperties();
-//            var list = DataTableHelper.ToDictionaryList(data, true);
-//            return Ok(list);
-//        }
-
-//        [HttpGet("GetBuildings")]
-//        public async Task<IActionResult> GetBuildings()
-//        {
-//            var data = await _service.GetBuildings();
-//            var list = DataTableHelper.ToDictionaryList(data, true);
-//            return Ok(list);
-//        }
-//    }
-//}
-
-
-
-
-
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TRL_API.BLL;
 using TRL_API.Helpers;
@@ -76,6 +35,13 @@ namespace TRL_API.Controllers
         public async Task<IActionResult> GetFloorsByBuilding(int buildingId)
         {
             var data = await _service.GetFloorsByBuilding(buildingId);
+            return Ok(DataTableHelper.ToDictionaryList(data, true));
+        }
+
+        [HttpGet("GetUnitsByBuilding/{buildingId}")]
+        public async Task<IActionResult> GetUnitsByBuilding(int buildingId)
+        {
+            var data = await _service.GetUnitsByBuilding(buildingId);
             return Ok(DataTableHelper.ToDictionaryList(data, true));
         }
 

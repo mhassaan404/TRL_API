@@ -1,33 +1,4 @@
-﻿//using System.Data;
-//using TRL_API.DAL;
-
-//namespace TRL_API.BLL
-//{
-//    public class PropertiesService
-//    {
-//        private readonly PropertiesRepository _dal;
-//        public PropertiesService(PropertiesRepository dal)
-//        {
-//            _dal = dal;
-//        }
-
-//        public async Task<DataTable> GetProperties()
-//        {
-//            return await _dal.GetProperties();
-//        }
-
-//        public async Task<DataTable> GetBuildings()
-//        {
-//            return await _dal.GetBuildings();
-//        }
-//    }
-//}
-
-
-
-
-
-using System.Data;
+﻿using System.Data;
 using TRL_API.DAL;
 
 namespace TRL_API.BLL
@@ -52,6 +23,11 @@ namespace TRL_API.BLL
         }
 
         public async Task<DataTable> GetFloorsByBuilding(int buildingId)
+        {
+            return await _dal.GetFloorsByBuilding(buildingId);
+        }
+
+        public async Task<DataTable> GetUnitsByBuilding(int buildingId)
         {
             return await _dal.GetFloorsByBuilding(buildingId);
         }

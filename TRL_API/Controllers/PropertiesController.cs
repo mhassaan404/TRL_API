@@ -38,10 +38,17 @@ namespace TRL_API.Controllers
             return Ok(DataTableHelper.ToDictionaryList(data, true));
         }
 
-        [HttpGet("GetUnitsByBuilding/{buildingId}")]
-        public async Task<IActionResult> GetUnitsByBuilding(int buildingId)
+        [HttpGet("GetUnitsByFloor/{floorId}")]
+        public async Task<IActionResult> GetUnitsByFloor(int floorId)
         {
-            var data = await _service.GetUnitsByBuilding(buildingId);
+            var data = await _service.GetUnitsByFloor(floorId);
+            return Ok(DataTableHelper.ToDictionaryList(data, true));
+        }
+
+        [HttpGet("GetUnitsStatus")]
+        public async Task<IActionResult> GetUnitsStatus()
+        {
+            var data = await _service.GetUnitsStatus();
             return Ok(DataTableHelper.ToDictionaryList(data, true));
         }
 

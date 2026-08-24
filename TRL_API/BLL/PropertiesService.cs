@@ -27,9 +27,14 @@ namespace TRL_API.BLL
             return await _dal.GetFloorsByBuilding(buildingId);
         }
 
-        public async Task<DataTable> GetUnitsByBuilding(int buildingId)
+        public async Task<DataTable> GetUnitsByFloor(int floorId)
         {
-            return await _dal.GetFloorsByBuilding(buildingId);
+            return await _dal.GetUnitsByFloor(floorId);
+        }
+
+        public async Task<DataTable> GetUnitsStatus()
+        {
+            return await _dal.GetUnitsStatus();
         }
 
         public async Task<DataTable> SaveBuilding(string buildingName, int cityId, int typeId, string address)

@@ -41,7 +41,7 @@ namespace TRL_API.DAL
         public async Task<DataTable> GetBuildings()
         {
             string query = @"SELECT 
-                b.BuildingId, b.BuildingName, b.Address, c.Name AS CityName, bt.Name AS Type
+                b.BuildingId, b.BuildingName, b.Address, b.CityId, b.TypeId, c.Name AS CityName, bt.Name AS Type
             FROM Buildings b
             JOIN City c ON b.CityId = c.Id
             JOIN BuildingType bt ON b.TypeId = bt.Id
@@ -68,35 +68,32 @@ namespace TRL_API.DAL
             return await _dbHelper.ExecuteQueryAsync(query, parameters);
         }
 
-        public async Task<DataTable> GetUnitsByBuilding(int buildingId)
+        public async Task<DataTable> GetUnitsByFloor(int floorId)
         {
             string query = @"SELECT 
-                u.UnitId,
-                u.UnitNumber,
-                u.BaseRent,
-                f.FloorNumber,
-                bt.Name AS PropertyType,
-                us.Name AS Status,
-                u.Note,
-                b.BuildingId,
-                b.BuildingName,
-                c.Name AS CityName
-            FROM Units u
-            JOIN Floors f ON u.FloorId = f.FloorId
-            JOIN Buildings b ON f.BuildingId = b.BuildingId
-            JOIN BuildingType bt ON b.TypeId = bt.Id
-            JOIN UnitStatus us ON u.StatusId = us.Id
-            JOIN City c ON b.CityId = c.Id
-            WHERE b.BuildingId = @BuildingId
-            AND u.IsActive = 1
-            ORDER BY f.FloorNumber, u.UnitNumber;";
+                UnitId,
+                UnitNumber
+            FROM Units
+            WHERE FloorId = @FloorId
+            AND IsActive = 1";
 
             var parameters = new[]
             {
-                new SqlParameter("@BuildingId", buildingId)
+                new SqlParameter("@FloorId", floorId)
             };
 
             return await _dbHelper.ExecuteQueryAsync(query, parameters);
+        }
+
+        public async Task<DataTable> GetUnitsStatus()
+        {
+            string query = @"SELECT 
+                Id,
+                Name
+            FROM UnitStatus
+            WHERE IsActive = 1";
+
+            return await _dbHelper.ExecuteQueryAsync(query);
         }
 
         public async Task<DataTable> SaveBuilding(string buildingName, int cityId, int typeId, string address)

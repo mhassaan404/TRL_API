@@ -1,5 +1,6 @@
 ﻿using Microsoft.Data.SqlClient;
 using System.Data;
+using TRL_API.Models;
 
 namespace TRL_API.Data
 {
@@ -12,44 +13,109 @@ namespace TRL_API.Data
             _connectionString = configuration.GetConnectionString("DefaultConnection")!;
         }
 
-        public async Task<DataTable> ExecuteQueryAsync(string query, SqlParameter[]? parameters = null, bool isStoredProc = false)
+        //public async Task<DataTable> ExecuteQueryAsync(string query, SqlParameter[]? parameters = null, bool isStoredProc = false)
+        //{
+        //    using (var conn = new SqlConnection(_connectionString))
+        //    {
+        //        await conn.OpenAsync();
+        //        using (var cmd = new SqlCommand(query, conn))
+        //        {
+        //            if (isStoredProc)
+        //                cmd.CommandType = CommandType.StoredProcedure;
+
+        //            if (parameters != null)
+        //                cmd.Parameters.AddRange(parameters);
+
+        //            using (var adapter = new SqlDataAdapter(cmd))
+        //            {
+        //                var dt = new DataTable();
+        //                adapter.Fill(dt);
+        //                return dt;
+        //            }
+        //        }
+        //    }
+        //}
+
+        //public async Task<int> ExecuteCommandAsync(string query, SqlParameter[]? parameters = null, SqlConnection? conn = null, SqlTransaction? transaction = null, bool isStoredProc = false)
+        //{
+        //    bool ownConnection = conn == null;
+        //    if (ownConnection) conn = new SqlConnection(_connectionString);
+        //    if (ownConnection) await conn!.OpenAsync();
+
+        //    using var cmd = new SqlCommand(query, conn, transaction);
+        //    if (isStoredProc) cmd.CommandType = CommandType.StoredProcedure;
+        //    if (parameters != null) cmd.Parameters.AddRange(parameters);
+
+        //    int rowsAffected = await cmd.ExecuteNonQueryAsync();
+        //    if (ownConnection) await conn!.CloseAsync();
+        //    return rowsAffected > 0 ? 1 : 0;
+        //}
+
+        public async Task<DataTable> ExecuteQueryReturnDataTableAsync(string commandText,
+            SqlParameter[]? parameters = null, bool isStoredProcedure = false)
         {
-            using (var conn = new SqlConnection(_connectionString))
-            {
-                await conn.OpenAsync();
-                using (var cmd = new SqlCommand(query, conn))
-                {
-                    if (isStoredProc)
-                        cmd.CommandType = CommandType.StoredProcedure;
+            using var con = new SqlConnection(_connectionString);
+            using var cmd = new SqlCommand(commandText, con);
 
-                    if (parameters != null)
-                        cmd.Parameters.AddRange(parameters);
+            if (isStoredProcedure)
+                cmd.CommandType = CommandType.StoredProcedure;
 
-                    using (var adapter = new SqlDataAdapter(cmd))
-                    {
-                        var dt = new DataTable();
-                        adapter.Fill(dt);
-                        return dt;
-                    }
-                }
-            }
+            if (parameters != null)
+                cmd.Parameters.AddRange(parameters);
+
+            cmd.CommandTimeout = 120;
+
+            await con.OpenAsync();
+
+            using var adapter = new SqlDataAdapter(cmd);
+
+            var dt = new DataTable();
+            adapter.Fill(dt);
+
+            return dt;
         }
 
-
-
-        public async Task<int> ExecuteCommandAsync(string query, SqlParameter[]? parameters = null, SqlConnection? conn = null, SqlTransaction? transaction = null, bool isStoredProc = false)
+        public async Task<ApiResponse> ExecuteQueryAsync(string commandText, SqlParameter[]? parameters = null, 
+            SqlConnection? conn = null, SqlTransaction? transaction = null, bool isStoredProcedure = false)
         {
+            var result = new ApiResponse();
             bool ownConnection = conn == null;
-            if (ownConnection) conn = new SqlConnection(_connectionString);
-            if (ownConnection) await conn!.OpenAsync();
 
-            using var cmd = new SqlCommand(query, conn, transaction);
-            if (isStoredProc) cmd.CommandType = CommandType.StoredProcedure;
-            if (parameters != null) cmd.Parameters.AddRange(parameters);
+            try
+            {
+                if (ownConnection)
+                {
+                    conn = new SqlConnection(_connectionString);
+                    await conn.OpenAsync();
+                }
 
-            int rowsAffected = await cmd.ExecuteNonQueryAsync();
-            if (ownConnection) await conn!.CloseAsync();
-            return rowsAffected > 0 ? 1 : 0;
+                using var cmd = new SqlCommand(commandText, conn, transaction);
+
+                if (isStoredProcedure)
+                    cmd.CommandType = CommandType.StoredProcedure;
+
+                if (parameters != null)
+                    cmd.Parameters.AddRange(parameters);
+
+                cmd.CommandTimeout = 120;
+
+                int rowsAffected = await cmd.ExecuteNonQueryAsync();
+
+                result.IsSuccess = true;
+                result.RowsAffected = rowsAffected;
+            }
+            catch (Exception ex)
+            {
+                result.IsSuccess = false;
+                result.ErrorMessage = ex.Message;
+            }
+            finally
+            {
+                if (ownConnection && conn != null)
+                    await conn.CloseAsync();
+            }
+
+            return result;
         }
 
         // Executes multiple commands in a transaction
@@ -58,6 +124,7 @@ namespace TRL_API.Data
             using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
             using var transaction = conn.BeginTransaction();
+
             try
             {
                 int result = await action(conn, transaction);

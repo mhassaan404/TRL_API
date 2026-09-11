@@ -42,9 +42,9 @@ namespace TRL_API.BLL
         {
             try
             {
-                int result = await _dal.SaveTenantAsync(tenant);
+                var result = await _dal.SaveTenantAsync(tenant);
 
-                if (result > 0)
+                if (result.IsSuccess)
                     return new ApiResponse { IsSuccess = true, Message = "Tenant saved successfully." };
 
                 return new ApiResponse { IsSuccess = false, Message = "No record saved." };
@@ -63,9 +63,9 @@ namespace TRL_API.BLL
         {
             try
             {
-                int result = await _dal.UpdateTenantAsync(tenant);
+                var result = await _dal.UpdateTenantAsync(tenant);
 
-                if (result > 0)
+                if (result.IsSuccess)
                     return new ApiResponse { IsSuccess = true, Message = "Tenant updated successfully." };
 
                 return new ApiResponse { IsSuccess = false, Message = "No record updated." };
@@ -92,9 +92,9 @@ namespace TRL_API.BLL
         {
             try
             {
-                int result = await _dal.DeleteTenantAsync(tenantId);
+                var result = await _dal.DeleteTenantAsync(tenantId);
 
-                if (result > 0)
+                if (result.IsSuccess)
                     return new ApiResponse { IsSuccess = true, Message = "Tenant deleted successfully." };
 
                 return new ApiResponse { IsSuccess = false, Message = "Tenant not found or already deleted." };

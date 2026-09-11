@@ -50,7 +50,7 @@ namespace TRL_API.DAL
                 new SqlParameter("@Month", string.IsNullOrEmpty(month) ? DBNull.Value : month)
             };
 
-            var dt = await _dbHelper.ExecuteQueryAsync(query, parameters);
+            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters);
             return dt;
         }
 
@@ -89,7 +89,7 @@ namespace TRL_API.DAL
             ORDER BY M.MonthStart;
             ";
 
-            var dt = await _dbHelper.ExecuteQueryAsync(query);
+            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query);
             return dt;
         }
 

@@ -241,17 +241,16 @@ namespace TRL_API.BLL
                 {
                     foreach (var payment in payments)
                     {
-                        int rows1 = await _dal.CreateRentAsync(payment, userId, conn, transaction);
-                        if (rows1 == 0)
+                        var res = await _dal.CreateRentAsync(payment, userId, conn, transaction);
+                        if (!res.IsSuccess)
                             throw new Exception("Failed to insert payment.");
 
-                        decimal effectivePayment =
-                            payment.PaymentAmount + payment.DiscountAmount;
+                        decimal effectivePayment = payment.PaymentAmount + payment.DiscountAmount;
 
-                        int rows2 =
+                        var res2 =
                             await _dal.UpdateInvoiceAfterRentAsync(payment.RentInvoiceId, effectivePayment, conn, transaction);
 
-                        if (rows2 == 0)
+                        if (!res2.IsSuccess)
                             throw new Exception("Failed to update invoice.");
                     }
 
@@ -278,9 +277,9 @@ namespace TRL_API.BLL
         {
             try
             {
-                int result = await _dal.CreatePaymentAdjustmentAsync(payments, userId);
+                var result = await _dal.CreatePaymentAdjustmentAsync(payments, userId);
 
-                if (result > 0)
+                if (result.IsSuccess)
                     return new ApiResponse { IsSuccess = true, Message = "Payment adjusted successfully." };
 
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "Failed to save adjustment. Please try again." };
@@ -373,8 +372,8 @@ namespace TRL_API.BLL
 
             try
             {
-                int rows = await _dal.BulkUpdateDueDateAsync(invoiceIds, newDueDate);
-                if (rows > 0)
+                var res = await _dal.BulkUpdateDueDateAsync(invoiceIds, newDueDate);
+                if (res.IsSuccess)
                     return new ApiResponse { IsSuccess = true, Message = "Due dates updated successfully." };
 
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "No matching invoices were found to update." };

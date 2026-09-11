@@ -18,14 +18,14 @@ namespace TRL_API.DAL
         {
             string query = @"select t.*, b.BuildingName, f.FloorNumber, u.UnitNumber, c.Name AS CityName from [dbo].[Tenants] t  LEFT JOIN Buildings b on t.BuildingId=b.BuildingId
                  LEFT JOIN Floors f on t.FloorId=f.FloorId  LEFT JOIN Units u on t.UnitId=u.UnitId LEFT JOIN City c ON t.CityId = c.Id";
-            var dt = await _dbHelper.ExecuteQueryAsync(query);
+            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query);
             return dt;
         }
 
         public async Task<DataTable> GetBuildings()
         {
             string query = @"SELECT BuildingId, BuildingName FROM Buildings WHERE IsActive = 1;";
-            var dt = await _dbHelper.ExecuteQueryAsync(query);
+            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query);
             return dt;
         }
 
@@ -36,10 +36,7 @@ namespace TRL_API.DAL
 
             if (buildingId.HasValue)
             {
-                query = @"
-                    SELECT FloorId, FloorNumber
-                    FROM Floors
-                    WHERE BuildingId = @BuildingId AND IsActive = 1;";
+                query = @"SELECT FloorId, FloorNumber FROM Floors WHERE BuildingId = @BuildingId AND IsActive = 1;";
                 parameters.Add(new SqlParameter("@BuildingId", buildingId.Value));
             }
             else
@@ -48,10 +45,9 @@ namespace TRL_API.DAL
                 query = @"SELECT FloorId, FloorNumber FROM Floors WHERE 1 = 0;";
             }
 
-            var dt = await _dbHelper.ExecuteQueryAsync(query, parameters.ToArray());
+            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters.ToArray());
             return dt;
         }
-
 
         public async Task<DataTable> GetUnits(int? floorId)
         {
@@ -60,9 +56,7 @@ namespace TRL_API.DAL
 
             if (floorId.HasValue)
             {
-                query = @"
-                    SELECT UnitId, UnitNumber
-                    FROM Units
+                query = @"SELECT UnitId, UnitNumber FROM Units
                     WHERE FloorId = @FloorId AND IsActive = 1;";
                 parameters.Add(new SqlParameter("@FloorId", floorId.Value));
             }
@@ -72,18 +66,18 @@ namespace TRL_API.DAL
                 query = @"SELECT UnitId, UnitNumber FROM Units WHERE 1 = 0;";
             }
 
-            var dt = await _dbHelper.ExecuteQueryAsync(query, parameters.ToArray());
+            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters.ToArray());
             return dt;
         }
 
         public async Task<DataTable> GetCities()
         {
             string query = @"select * from [dbo].[City]";
-            var dt = await _dbHelper.ExecuteQueryAsync(query);
+            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query);
             return dt;
         }
 
-        public async Task<int> SaveTenantAsync(Tenants tenant)
+        public async Task<ApiResponse> SaveTenantAsync(Tenants tenant)
         {
             if (tenant.IsActive == true)
                 tenant.MoveOutDate = null;
@@ -112,10 +106,10 @@ namespace TRL_API.DAL
                 new SqlParameter("@IsActive", tenant.IsActive)
             };
 
-            return await _dbHelper.ExecuteCommandAsync(query, parameters);
+            return await _dbHelper.ExecuteQueryAsync(query, parameters);
         }
 
-        public async Task<int> UpdateTenantAsync(Tenants tenant)
+        public async Task<ApiResponse> UpdateTenantAsync(Tenants tenant)
         {
             string query = @"
             UPDATE [dbo].[Tenants]
@@ -158,10 +152,10 @@ namespace TRL_API.DAL
                 new SqlParameter("@IsActive", tenant.IsActive ?? (object)DBNull.Value)
             };
 
-            return await _dbHelper.ExecuteCommandAsync(query, parameters);
+            return await _dbHelper.ExecuteQueryAsync(query, parameters);
         }
 
-        public async Task<int> DeleteTenantAsync(int tenantId)
+        public async Task<ApiResponse> DeleteTenantAsync(int tenantId)
         {
             string query = @"DELETE FROM [dbo].[Tenants] WHERE TenantId = @TenantId";
 
@@ -170,7 +164,7 @@ namespace TRL_API.DAL
                 new SqlParameter("@TenantId", tenantId),
             };
 
-            return await _dbHelper.ExecuteCommandAsync(query, parameters);
+            return await _dbHelper.ExecuteQueryAsync(query, parameters);
         }
     }
 }

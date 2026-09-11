@@ -35,7 +35,7 @@ namespace TRL_API.DAL
             ORDER BY t.TenantId;
             ";
 
-            return await _dbHelper.ExecuteQueryAsync(query);
+            return await _dbHelper.ExecuteQueryReturnDataTableAsync(query);
         }
 
         public async Task<DataTable> GetStatusListAsync()
@@ -45,7 +45,7 @@ namespace TRL_API.DAL
                 FROM StatusList
                 WHERE IsActive = 1;";
 
-            return await _dbHelper.ExecuteQueryAsync(query);
+            return await _dbHelper.ExecuteQueryReturnDataTableAsync(query);
         }
 
         public async Task<DataTable> GetInvoicesByTenantAsync(int tenantId)
@@ -68,7 +68,7 @@ namespace TRL_API.DAL
             ORDER BY ri.InvoiceDate DESC;";
 
             var parameters = new[] { new SqlParameter("@TenantId", tenantId) };
-            return await _dbHelper.ExecuteQueryAsync(query, parameters);
+            return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters);
         }
 
         //    public async Task<DataTable> GetInvoiceByIdAsync(int invoiceId)
@@ -150,7 +150,7 @@ namespace TRL_API.DAL
         ORDER BY p.PaymentDate DESC;
     ";
             var parameters = new[] { new SqlParameter("@InvoiceId", invoiceId) };
-            return await _dbHelper.ExecuteQueryAsync(query, parameters);
+            return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters);
         }
 
         //public async Task<DataTable> GetPaymentHistoryByIdAsync(int invoiceId)
@@ -215,7 +215,7 @@ namespace TRL_API.DAL
                 ORDER BY p.PaymentDate DESC, p.Id DESC;
             ";
             var parameters = new[] { new SqlParameter("@InvoiceId", invoiceId) };
-            return await _dbHelper.ExecuteQueryAsync(query, parameters);
+            return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters);
         }
 
         //public async Task<DataTable> GetInvoiceDetailsAsync(int invoiceId)
@@ -347,7 +347,7 @@ namespace TRL_API.DAL
             ORDER BY InvoiceDate DESC;
             ";
             var parameters = new[] { new SqlParameter("@TenantId", tenantId) };
-            return await _dbHelper.ExecuteQueryAsync(query, parameters);
+            return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters);
         }
 
         //public async Task<int> CreateRentAsync(Payments payment, SqlConnection conn, SqlTransaction transaction)
@@ -376,7 +376,7 @@ namespace TRL_API.DAL
         //    return await _dbHelper.ExecuteCommandAsync(query, parameters, conn, transaction);
         //}
 
-        public async Task<int> CreatePaymentAdjustmentAsync(Payments payment, int userId)
+        public async Task<ApiResponse> CreatePaymentAdjustmentAsync(Payments payment, int userId)
         {
             string query = @"
             INSERT INTO Payments
@@ -399,10 +399,10 @@ namespace TRL_API.DAL
                 new SqlParameter("@CreatedBy", userId),
             };
 
-            return await _dbHelper.ExecuteCommandAsync(query, parameters);
+            return await _dbHelper.ExecuteQueryAsync(query, parameters);
         }
 
-        public async Task<int> CreateRentAsync(Payments payment, int userId, SqlConnection conn, SqlTransaction transaction)
+        public async Task<ApiResponse> CreateRentAsync(Payments payment, int userId, SqlConnection conn, SqlTransaction transaction)
         {
             string query = @"
             INSERT INTO Payments
@@ -426,10 +426,10 @@ namespace TRL_API.DAL
                 new SqlParameter("@CreatedBy", userId),
             };
 
-            return await _dbHelper.ExecuteCommandAsync(query, parameters, conn, transaction);
+            return await _dbHelper.ExecuteQueryAsync(query, parameters, conn, transaction);
         }
 
-        public async Task<int> UpdateInvoiceAfterRentAsync(int invoiceId, decimal paymentAmount, SqlConnection conn, SqlTransaction transaction)
+        public async Task<ApiResponse> UpdateInvoiceAfterRentAsync(int invoiceId, decimal paymentAmount, SqlConnection conn, SqlTransaction transaction)
         {
             string query = @"
             UPDATE RentInvoices
@@ -464,7 +464,7 @@ namespace TRL_API.DAL
                 new SqlParameter("@PaymentAmount", paymentAmount)
             };
 
-            return await _dbHelper.ExecuteCommandAsync(query, parameters, conn, transaction);
+            return await _dbHelper.ExecuteQueryAsync(query, parameters, conn, transaction);
         }
 
         //public async Task<int> AddPaymentAsync(Payments rr)
@@ -609,70 +609,70 @@ namespace TRL_API.DAL
         public async Task<DataTable> GetRentCollectionAsync()
         {
             string query = @"
-        SELECT
-            ri.Id AS InvoiceId,
-            t.TenantId,
-            t.Name AS TenantName,
-            b.BuildingName,
-            f.FloorNumber,
-            u.UnitNumber,
-            ri.InvoiceDate,
-            ISNULL(ri.TotalRent, 0) AS MonthlyRent,
-            ri.DueDate,
-            
-            ISNULL(ri.TotalRent - SUM(ISNULL(p.PaymentAmount, 0)) - SUM(ISNULL(p.DiscountAmount, 0)), 0)
-                AS RemainingAmount,
-            
-            CASE
-                WHEN (ri.TotalRent - SUM(ISNULL(p.PaymentAmount, 0)) - SUM(ISNULL(p.DiscountAmount, 0))) > 0
-                     AND ri.DueDate < CAST(GETUTCDATE() AS DATE)
-                     AND NOT EXISTS (
-                         SELECT 1 FROM Payments p2 
-                         WHERE p2.RentInvoiceId = ri.Id 
-                           AND ISNULL(p2.IsLateFeeWaived, 0) = 1
-                     )
-                THEN dbo.CalculateLateFee(
-                         (ri.TotalRent - SUM(ISNULL(p.PaymentAmount, 0)) - SUM(ISNULL(p.DiscountAmount, 0))),
-                         ri.TotalRent,
-                         ri.DueDate,
-                         GETUTCDATE()
-                     )
-                ELSE 0
-            END AS LateFee,
-            
-            s.StatusName,
-            SUM(ISNULL(p.PaymentAmount, 0)) AS PaidAmount,
-            SUM(ISNULL(p.DiscountAmount, 0)) AS AppliedDiscount,
-            MAX(p.PaymentDate) AS LastPaymentDate
-        FROM RentInvoices ri
-        INNER JOIN Tenants t ON ri.TenantId = t.TenantId
-        INNER JOIN Units u ON t.UnitId = u.UnitId
-        INNER JOIN Floors f ON u.FloorId = f.FloorId
-        INNER JOIN Buildings b ON u.BuildingId = b.BuildingId
-        INNER JOIN StatusList s ON ri.StatusId = s.StatusId
-        LEFT JOIN Payments p ON ri.Id = p.RentInvoiceId
-        WHERE ri.StatusId IN (2, 8, 9)
-        GROUP BY
-            ri.Id, t.TenantId, t.Name, b.BuildingName, f.FloorNumber, u.UnitNumber,
-            ri.InvoiceDate, ri.TotalRent, ri.DueDate, s.StatusName
-        ORDER BY ri.InvoiceDate DESC, t.Name;
-    ";
-            return await _dbHelper.ExecuteQueryAsync(query);
+                SELECT
+                    ri.Id AS InvoiceId,
+                    t.TenantId,
+                    t.Name AS TenantName,
+                    b.BuildingName,
+                    f.FloorNumber,
+                    u.UnitNumber,
+                    ri.InvoiceDate,
+                    ISNULL(ri.TotalRent, 0) AS MonthlyRent,
+                    ri.DueDate,
+                    
+                    ISNULL(ri.TotalRent - SUM(ISNULL(p.PaymentAmount, 0)) - SUM(ISNULL(p.DiscountAmount, 0)), 0)
+                        AS RemainingAmount,
+                    
+                    CASE
+                        WHEN (ri.TotalRent - SUM(ISNULL(p.PaymentAmount, 0)) - SUM(ISNULL(p.DiscountAmount, 0))) > 0
+                             AND ri.DueDate < CAST(GETUTCDATE() AS DATE)
+                             AND NOT EXISTS (
+                                 SELECT 1 FROM Payments p2 
+                                 WHERE p2.RentInvoiceId = ri.Id 
+                                   AND ISNULL(p2.IsLateFeeWaived, 0) = 1
+                             )
+                        THEN dbo.CalculateLateFee(
+                                 (ri.TotalRent - SUM(ISNULL(p.PaymentAmount, 0)) - SUM(ISNULL(p.DiscountAmount, 0))),
+                                 ri.TotalRent,
+                                 ri.DueDate,
+                                 GETUTCDATE()
+                             )
+                        ELSE 0
+                    END AS LateFee,
+                    
+                    s.StatusName,
+                    SUM(ISNULL(p.PaymentAmount, 0)) AS PaidAmount,
+                    SUM(ISNULL(p.DiscountAmount, 0)) AS AppliedDiscount,
+                    MAX(p.PaymentDate) AS LastPaymentDate
+                FROM RentInvoices ri
+                INNER JOIN Tenants t ON ri.TenantId = t.TenantId
+                INNER JOIN Units u ON t.UnitId = u.UnitId
+                INNER JOIN Floors f ON u.FloorId = f.FloorId
+                INNER JOIN Buildings b ON u.BuildingId = b.BuildingId
+                INNER JOIN StatusList s ON ri.StatusId = s.StatusId
+                LEFT JOIN Payments p ON ri.Id = p.RentInvoiceId
+                WHERE ri.StatusId IN (2, 8, 9)
+                GROUP BY
+                    ri.Id, t.TenantId, t.Name, b.BuildingName, f.FloorNumber, u.UnitNumber,
+                    ri.InvoiceDate, ri.TotalRent, ri.DueDate, s.StatusName
+                ORDER BY ri.InvoiceDate DESC, t.Name;
+            ";
+            return await _dbHelper.ExecuteQueryReturnDataTableAsync(query);
         }
 
         public async Task<DataTable> GetPaymentHistoryAsync(int invoiceId)
         {
             string query = @"
-        SELECT PaymentAmount, PaymentDate, PaymentMethod, StatusId
-        FROM Payments
-        WHERE RentInvoiceId = @InvoiceId
-        ORDER BY PaymentDate ASC;";
+                SELECT PaymentAmount, PaymentDate, PaymentMethod, StatusId
+                FROM Payments
+                WHERE RentInvoiceId = @InvoiceId
+                ORDER BY PaymentDate ASC;";
 
             var parameters = new[] { new SqlParameter("@InvoiceId", invoiceId) };
-            return await _dbHelper.ExecuteQueryAsync(query, parameters);
+            return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters);
         }
 
-        public async Task<int> BulkUpdateDueDateAsync(List<int> invoiceIds, DateTime newDueDate)
+        public async Task<ApiResponse> BulkUpdateDueDateAsync(List<int> invoiceIds, DateTime newDueDate)
         {
             // Build parameterized IN clause
             var inParams = invoiceIds.Select((id, index) => $"@Id{index}").ToArray();
@@ -686,7 +686,7 @@ namespace TRL_API.DAL
                 .ToList();
             parameters.Add(new SqlParameter("@NewDueDate", newDueDate));
 
-            return await _dbHelper.ExecuteCommandAsync(query, parameters.ToArray());
+            return await _dbHelper.ExecuteQueryAsync(query, parameters.ToArray());
         }
 
     }

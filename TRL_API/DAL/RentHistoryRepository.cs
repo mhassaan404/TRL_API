@@ -53,7 +53,7 @@ namespace TRL_API.DAL
             ORDER BY COALESCE(MAX(p.PaymentDate), ri.DueDate) DESC;
             ";
 
-            return await _dbHelper.ExecuteQueryAsync(query);
+            return await _dbHelper.ExecuteQueryReturnDataTableAsync(query);
         }
     }
 }

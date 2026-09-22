@@ -77,6 +77,13 @@ namespace TRL_API.DAL
             return dt;
         }
 
+        public async Task<decimal> GetUnitBaseRent(int unitId)
+        {
+            string query = "SELECT BaseRent FROM Units WHERE UnitId = @UnitId";
+            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query, new[] { new SqlParameter("@UnitId", unitId) });
+            return dt.Rows.Count > 0 && dt.Rows[0]["BaseRent"] != DBNull.Value ? Convert.ToDecimal(dt.Rows[0]["BaseRent"]) : 0m;
+        }
+
         public async Task<ApiResponse> SaveTenantAsync(Tenants tenant)
         {
             if (tenant.IsActive == true)

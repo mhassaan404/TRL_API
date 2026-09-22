@@ -13,6 +13,13 @@ namespace TRL_API.Data
             _connectionString = configuration.GetConnectionString("DefaultConnection")!;
         }
 
+        public async Task<SqlConnection> GetOpenConnectionAsync()
+        {
+            var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            return conn;
+        }
+
         //public async Task<DataTable> ExecuteQueryAsync(string query, SqlParameter[]? parameters = null, bool isStoredProc = false)
         //{
         //    using (var conn = new SqlConnection(_connectionString))

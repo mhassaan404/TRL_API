@@ -1,8 +1,230 @@
-﻿using Microsoft.Data.SqlClient;
+﻿//using System.Data;
+//using TRL_API.DAL;
+//using TRL_API.Helpers;
+//using TRL_API.Models;
+
+//namespace TRL_API.BLL
+//{
+//    public class RentService
+//    {
+//        private readonly RentRepository _dal;
+
+//        public RentService(RentRepository dal)
+//        {
+//            _dal = dal;
+//        }
+
+//        public async Task<DataTable> GetTenantsAsync() => await _dal.GetTenantsAsync();
+
+//        public async Task<DataTable> GetStatusListAsync() => await _dal.GetStatusListAsync();
+
+//        public async Task<DataTable> GetInvoicesByTenantAsync(int tenantId) => await _dal.GetInvoicesByTenantAsync(tenantId);
+
+//        public async Task<object> GetInvoiceByIdAsync(int invoiceId)
+//        {
+//            var dt = await _dal.GetInvoiceByIdAsync(invoiceId);
+//            var rows = DataTableHelper.ToDictionaryList(dt, true);
+//            return new { invoiceId, payments = rows };
+//        }
+
+//        public async Task<DataTable> GetPaymentHistoryByIdAsync(int invoiceId) => await _dal.GetPaymentHistoryByIdAsync(invoiceId);
+
+//        public async Task<DataTable> GetRentCollectionAsync() => await _dal.GetRentCollectionAsync();
+
+//        public async Task<DataTable> GetPaymentHistoryAsync(int invoiceId) => await _dal.GetPaymentHistoryAsync(invoiceId);
+
+//        // ---------------- UNPAID INVOICES + SUMMARY FOR A TENANT ----------------
+
+//        public async Task<object> GetUnpaidInvoicesByTenantAsync(int tenantId)
+//        {
+//            var dt = await _dal.GetUnpaidInvoiceByTenant(tenantId);
+//            var invoices = DataTableHelper.ToDictionaryList(dt, true);
+
+//            decimal monthlyRent = 0, pending = 0, previousBalance = 0, totalLateFee = 0;
+
+//            if (dt.Rows.Count > 0)
+//            {
+//                // Query orders by InvoiceDate DESC, so row 0 is the most recent invoice.
+//                monthlyRent = Convert.ToDecimal(dt.Rows[0]["MonthlyRent"]);
+//                totalLateFee = Convert.ToDecimal(dt.Rows[0]["TotalLateFeePerTenant"]);
+
+//                for (int i = 0; i < dt.Rows.Count; i++)
+//                {
+//                    var remaining = Convert.ToDecimal(dt.Rows[i]["RemainingAmount"]);
+//                    pending += remaining;
+
+//                    // "Previous balance" = arrears from every invoice except the
+//                    // most recent one (row 0).
+//                    if (i > 0)
+//                    {
+//                        previousBalance += remaining;
+//                    }
+//                }
+//            }
+
+//            var summary = new
+//            {
+//                monthlyRent,
+//                pending,
+//                previousBalance,
+//                totalLateFee,
+//            };
+
+//            return new { invoices, summary };
+//        }
+
+//        // ---------------- PAYMENTS ----------------
+
+//        // TODO: adjust this if your DbHelper exposes the connection differently
+//        // (e.g. a different method name). This just needs an open SqlConnection
+//        // so multiple payments in one submission share a single transaction.
+//        public async Task<ApiResponse> SubmitOrUpdatePayments(List<Payments> payments, int userId)
+//        {
+//            using var conn = await _dal.GetOpenConnectionAsync();
+//            using var transaction = conn.BeginTransaction();
+
+//            try
+//            {
+//                foreach (var payment in payments)
+//                {
+//                    var insertResult = await _dal.CreateRentAsync(payment, userId, conn, transaction);
+//                    if (!insertResult.IsSuccess)
+//                    {
+//                        transaction.Rollback();
+//                        return new ApiResponse { IsSuccess = false, Message = $"Failed to record payment for invoice #{payment.RentInvoiceId}." };
+//                    }
+
+//                    var updateResult = await _dal.UpdateInvoiceAfterRentAsync(payment.RentInvoiceId, payment.PaymentAmount + payment.DiscountAmount, conn, transaction);
+//                    if (!updateResult.IsSuccess)
+//                    {
+//                        transaction.Rollback();
+//                        return new ApiResponse { IsSuccess = false, Message = $"Failed to update invoice #{payment.RentInvoiceId} after payment." };
+//                    }
+//                }
+
+//                transaction.Commit();
+//                return new ApiResponse { IsSuccess = true, Message = "Payment recorded successfully." };
+//            }
+//            catch (Exception ex)
+//            {
+//                transaction.Rollback();
+//                return new ApiResponse { IsSuccess = false, Message = "Error occurred while recording payment. " + ex.Message };
+//            }
+//        }
+
+//        public async Task<ApiResponse> CreateRentAsync(List<Payments> payments, int userId) =>
+//            await SubmitOrUpdatePayments(payments, userId);
+
+//        public async Task<ApiResponse> UpdatePaymentsAsync(List<Payments> payments, int userId) =>
+//            await SubmitOrUpdatePayments(payments, userId);
+
+//        public async Task<ApiResponse> CreatePaymentAdjustmentAsync(Payments payment, int userId)
+//        {
+//            try
+//            {
+//                var insertResult = await _dal.CreatePaymentAdjustmentAsync(payment, userId);
+//                if (!insertResult.IsSuccess)
+//                {
+//                    return new ApiResponse { IsSuccess = false, ErrorMessage = "Failed to record adjustment." };
+//                }
+
+//                // FIX: the original adjustment path only inserted into Payments and
+//                // never touched RentInvoices — meaning an adjustment that fully paid
+//                // off an invoice would never update its StatusId, and it would keep
+//                // showing as Unpaid/Partial in the collections list forever.
+//                await _dal.UpdateInvoiceAfterRentAsync(
+//                    payment.RentInvoiceId,
+//                    payment.PaymentAmount + payment.DiscountAmount);
+
+//                return new ApiResponse { IsSuccess = true, Message = "Adjustment recorded." };
+//            }
+//            catch (Exception ex)
+//            {
+//                return new ApiResponse { IsSuccess = false, ErrorMessage = "Error occurred while recording adjustment. " + ex.Message };
+//            }
+//        }
+
+//        public async Task<ApiResponse> DeletePaymentAsync(int invoiceId)
+//        {
+//            try
+//            {
+//                var result = await _dal.DeleteLastPaymentForInvoice(invoiceId);
+//                return result.IsSuccess
+//                    ? new ApiResponse { IsSuccess = true, Message = "Last payment on this invoice was deleted." }
+//                    : new ApiResponse { IsSuccess = false, ErrorMessage = "No payment found to delete for this invoice." };
+//            }
+//            catch (Exception ex)
+//            {
+//                return new ApiResponse { IsSuccess = false, ErrorMessage = "Error occurred while deleting payment. " + ex.Message };
+//            }
+//        }
+
+//        public async Task<ApiResponse> BulkUpdateDueDateAsync(List<int> invoiceIds, DateTime newDueDate)
+//        {
+//            try
+//            {
+//                var result = await _dal.BulkUpdateDueDateAsync(invoiceIds, newDueDate);
+//                return result.IsSuccess
+//                    ? new ApiResponse { IsSuccess = true, Message = $"Due date updated for {invoiceIds.Count} invoice(s)." }
+//                    : new ApiResponse { IsSuccess = false, ErrorMessage = "Failed to update due dates." };
+//            }
+//            catch (Exception ex)
+//            {
+//                return new ApiResponse { IsSuccess = false, ErrorMessage = "Error occurred while updating due dates. " + ex.Message };
+//            }
+//        }
+
+//        // ---------------- BULK INVOICE GENERATION (manual button) ----------------
+
+//        public async Task<ApiResponse> GenerateInvoicesAsync(int month, int year, int dueInDays)
+//        {
+//            try
+//            {
+//                var tenants = await _dal.GetActiveTenantsWithoutInvoiceForMonth(month, year);
+
+//                if (tenants.Rows.Count == 0)
+//                {
+//                    return new ApiResponse
+//                    {
+//                        IsSuccess = true,
+//                        RowsAffected = 0,
+//                        Message = "All active tenants already have an invoice for this month.",
+//                    };
+//                }
+
+//                var invoiceDate = new DateTime(year, month, 1);
+//                var dueDate = invoiceDate.AddDays(dueInDays);
+//                int created = 0;
+
+//                foreach (DataRow row in tenants.Rows)
+//                {
+//                    int tenantId = Convert.ToInt32(row["TenantId"]);
+//                    decimal monthlyRent = Convert.ToDecimal(row["MonthlyRent"]);
+
+//                    var result = await _dal.CreateInvoice(tenantId, monthlyRent, invoiceDate, dueDate);
+//                    if (result.IsSuccess) created++;
+//                }
+
+//                return new ApiResponse
+//                {
+//                    IsSuccess = true,
+//                    RowsAffected = created,
+//                    Message = $"{created} invoice(s) generated for {invoiceDate:MMMM yyyy}.",
+//                };
+//            }
+//            catch (Exception ex)
+//            {
+//                return new ApiResponse { IsSuccess = false, Message = "Error occurred while generating invoices. " + ex.Message };
+//            }
+//        }
+//    }
+//}
+
+
+
+
 using System.Data;
 using TRL_API.DAL;
-using TRL_API.Data;
-using TRL_API.DTOs.Rent;
 using TRL_API.Helpers;
 using TRL_API.Models;
 
@@ -10,377 +232,320 @@ namespace TRL_API.BLL
 {
     public class RentService
     {
-        private readonly DbHelper _dbHelper;
         private readonly RentRepository _dal;
 
-        public RentService(RentRepository dal, DbHelper dbHelper)
+        public RentService(RentRepository dal)
         {
             _dal = dal;
-            _dbHelper = dbHelper;
         }
 
-        public async Task<DataTable> GetTenantsAsync()
+        public async Task<DataTable> GetTenantsAsync() => await _dal.GetTenantsAsync();
+
+        public async Task<DataTable> GetStatusListAsync() => await _dal.GetStatusListAsync();
+
+        public async Task<DataTable> GetInvoicesByTenantAsync(int tenantId) => await _dal.GetInvoicesByTenantAsync(tenantId);
+
+        public async Task<object> GetInvoiceByIdAsync(int invoiceId)
         {
-            return await _dal.GetTenantsAsync();
+            var dt = await _dal.GetInvoiceByIdAsync(invoiceId);
+            var rows = DataTableHelper.ToDictionaryList(dt, true);
+            return new { invoiceId, payments = rows };
         }
 
-        public async Task<DataTable> GetStatusListAsync()
+        public async Task<DataTable> GetPaymentHistoryByIdAsync(int invoiceId) => await _dal.GetPaymentHistoryByIdAsync(invoiceId);
+
+        public async Task<DataTable> GetRentCollectionAsync() => await _dal.GetRentCollectionAsync();
+
+        public async Task<DataTable> GetTenantsWithRentAsync() => await _dal.GetTenantsWithRent();
+
+        public async Task<ApiResponse> UpdateTenantMonthlyRentAsync(int tenantId, decimal newRent)
         {
-            return await _dal.GetStatusListAsync();
+            if (newRent <= 0) return new ApiResponse { IsSuccess = false, ErrorMessage = "Rent must be greater than zero." };
+            return await _dal.UpdateTenantMonthlyRent(tenantId, newRent);
         }
 
-        // Invoices
-        public async Task<DataTable> GetInvoicesByTenantAsync(int tenantId)
+        public async Task<DataTable> GetPaymentHistoryAsync(int invoiceId) => await _dal.GetPaymentHistoryAsync(invoiceId);
+
+        // ---------------- UNPAID INVOICES + SUMMARY FOR A TENANT ----------------
+
+        public async Task<object> GetUnpaidInvoicesByTenantAsync(int tenantId)
         {
-            return await _dal.GetInvoicesByTenantAsync(tenantId);
-        }
+            var dt = await _dal.GetUnpaidInvoiceByTenant(tenantId);
+            var invoices = DataTableHelper.ToDictionaryList(dt, true);
 
-        // Invoices
-        //public async Task<DataTable> GetInvoiceByIdAsync(int invoiceId)
-        //{
-        //    DataTable dt;
-        //    dt = await _dal.GetInvoiceByIdAsync(invoiceId);
-        //    // Assume dt already has invoice row(s)
-        //    if (dt.Rows.Count > 0)
-        //    {
-        //        // Add LateFee column if it doesn't exist
-        //        if (!dt.Columns.Contains("LateFee"))
-        //            dt.Columns.Add("LateFee", typeof(decimal));
+            decimal monthlyRent = 0, pending = 0, previousBalance = 0, totalLateFee = 0;
 
-        //        // Loop through all rows (in case multiple rows exist for the same invoice)
-        //        foreach (DataRow row in dt.Rows)
-        //        {
-        //            decimal monthlyRent = Convert.ToDecimal(row["MonthlyRent"]);
-        //            DateTime dueDate = Convert.ToDateTime(row["DueDate"]);
-        //            int tenantId = Convert.ToInt32(row["TenantId"]);
-
-        //            // Calculate late fee using your calculator
-        //            decimal lateFee = LateFeeCalculator.Calculate(0, monthlyRent, dueDate, DateTime.UtcNow);
-
-        //            // Update DataTable row
-        //            row["LateFee"] = lateFee;
-        //        }
-        //    }
-        //    return dt;
-        //}
-        public async Task<InvoiceResponseDto> GetInvoiceByIdAsync(int invoiceId)
-        {
-            DataTable dt = await _dal.GetInvoiceByIdAsync(invoiceId);
-
-            var invoices = new List<InvoiceRowDto>();
-
-            foreach (DataRow row in dt.Rows)
+            if (dt.Rows.Count > 0)
             {
-                decimal monthlyRent = Convert.ToDecimal(row["MonthlyRent"]);
-                decimal paid = Convert.ToDecimal(row["PaidAmount"] ?? 0);
-                DateTime dueDate = Convert.ToDateTime(row["DueDate"]);
+                // Query orders by InvoiceDate DESC, so row 0 is the most recent invoice.
+                monthlyRent = Convert.ToDecimal(dt.Rows[0]["MonthlyRent"]);
+                totalLateFee = Convert.ToDecimal(dt.Rows[0]["TotalLateFeePerTenant"]);
 
-                decimal lateFee = LateFeeCalculator.Calculate(
-                    0,
-                    monthlyRent,
-                    dueDate,
-                    DateTime.UtcNow
-                );
-
-                var invoice = new InvoiceRowDto
+                for (int i = 0; i < dt.Rows.Count; i++)
                 {
-                    InvoiceId = row.GetInt("InvoiceId"),
-                    PaymentId = row.GetNullableInt("PaymentId"),
-                    TenantId = row.GetInt("TenantId"),
-                    TenantName = row.GetString("TenantName"),
-                    BuildingName = row.GetString("BuildingName"),
-                    FloorNumber = row.GetString("FloorNumber"),
-                    UnitNumber = row.GetString("UnitNumber"),
+                    var remaining = Convert.ToDecimal(dt.Rows[i]["RemainingAmount"]);
+                    pending += remaining;
 
-                    InvoiceDate = row.GetDateTime("InvoiceDate"),
-                    MonthlyRent = row.GetDecimal("MonthlyRent"),
-                    DueDate = row.GetDateTime("DueDate"),
-                    RemainingAmount = row.GetDecimal("RemainingAmount"),
-                    StatusId = row.GetInt("StatusId"),
-                    StatusName = row.GetString("StatusName"),
-
-                    PaidAmount = row.GetDecimal("PaidAmount"),
-                    PaymentDate = row.GetNullableDateTime("PaymentDate"),
-                    PaymentMethod = row.GetString("PaymentMethod"),
-                    Notes = row.GetString("Notes"),
-                    CreatedAt = row.GetDateTime("CreatedAt"),
-
-                    DiscountAmount = row.GetDecimal("DiscountAmount"),
-                    DiscountPercent = row.GetDecimal("DiscountPercent"),
-                    IsLateFeeWaived = row.GetBool("IsLateFeeWaived"),
-
-                    // LateFee calculated separately
-                    LateFee = LateFeeCalculator.Calculate(0, row.GetDecimal("MonthlyRent"), row.GetDateTime("DueDate"), DateTime.UtcNow)
-                };
-
-                invoices.Add(invoice);
+                    // "Previous balance" = arrears from every invoice except the
+                    // most recent one (row 0).
+                    if (i > 0)
+                    {
+                        previousBalance += remaining;
+                    }
+                }
             }
 
-            var summary = new InvoiceSummaryDto
+            var summary = new
             {
-                MonthlyRent = invoices.LastOrDefault()?.MonthlyRent ?? 0,
-                Pending = invoices.Sum(i => i.MonthlyRent - i.PaidAmount - i.DiscountAmount),
-                PreviousBalance = invoices
-                    .OrderBy(i => i.DueDate)
-                    .SkipLast(1)
-                    .Sum(i => i.MonthlyRent - i.PaidAmount - i.DiscountAmount),
-                TotalLateFee = invoices.Sum(i => i.IsLateFeeWaived ? 0 : i.LateFee)
+                monthlyRent,
+                pending,
+                previousBalance,
+                totalLateFee,
             };
 
-            return new InvoiceResponseDto
-            {
-                Invoices = invoices,
-                Summary = summary
-            };
+            return new { invoices, summary };
         }
 
-        public async Task<DataTable> GetPaymentHistoryByIdAsync(int invoiceId)
-        {
-            return await _dal.GetPaymentHistoryByIdAsync(invoiceId);
-        }
+        // ---------------- PAYMENTS ----------------
 
-        public async Task<InvoiceResponseDto> GetUnpaidInvoicesByTenantAsync(int tenantId)
+        // TODO: adjust this if your DbHelper exposes the connection differently
+        // (e.g. a different method name). This just needs an open SqlConnection
+        // so multiple payments in one submission share a single transaction.
+        public async Task<ApiResponse> SubmitOrUpdatePayments(List<Payments> payments, int userId)
         {
-            DataTable dt = await _dal.GetUnpaidInvoiceByTenant(tenantId);
-            var invoices = new List<InvoiceRowDto>();
+            using var conn = await _dal.GetOpenConnectionAsync();
+            using var transaction = conn.BeginTransaction();
 
-            foreach (DataRow row in dt.Rows)
+            try
             {
-                var invoice = new InvoiceRowDto
+                foreach (var payment in payments)
                 {
-                    InvoiceId = row.GetInt("InvoiceId"),
-                    PaymentId = null, // ADD mode → no payment yet
+                    var err = await _dal.ValidatePaymentAsync(payment, conn, transaction);
+                    if (err != null)
+                    {
+                        transaction.Rollback();
+                        return new ApiResponse { IsSuccess = false, Message = err, ErrorMessage = err };
+                    }
 
-                    TenantId = row.GetInt("TenantId"),
-                    TenantName = row.GetString("TenantName"),
+                    var insertResult = await _dal.CreateRentAsync(payment, userId, conn, transaction);
+                    if (!insertResult.IsSuccess)
+                    {
+                        transaction.Rollback();
+                        return new ApiResponse { IsSuccess = false, Message = $"Failed to record payment for invoice #{payment.RentInvoiceId}." };
+                    }
 
-                    InvoiceDate = row.GetDateTime("InvoiceDate"),
-                    DueDate = row.GetDateTime("DueDate"),
+                    var updateResult = await _dal.UpdateInvoiceAfterRentAsync(payment.RentInvoiceId, payment.PaymentAmount + payment.DiscountAmount, conn, transaction);
+                    if (!updateResult.IsSuccess)
+                    {
+                        transaction.Rollback();
+                        return new ApiResponse { IsSuccess = false, Message = $"Failed to update invoice #{payment.RentInvoiceId} after payment." };
+                    }
+                }
 
-                    MonthlyRent = row.GetDecimal("MonthlyRent"),
-                    PaidAmount = row.GetDecimal("PaidAmount"),
-                    RemainingAmount = row.GetDecimal("RemainingAmount"),
-
-                    DiscountAmount = row.GetDecimal("DiscountAmount"),
-                    DiscountPercent = row.GetDecimal("DiscountPercent"),
-
-                    IsLateFeeWaived = row.GetBool("WaveLate"),
-
-                    LateFee = row.GetDecimal("LateFee"),
-
-                    PayAmount = 0,
-                    PaymentDate = null,
-                    PaymentMethod = "",
-                    Notes = "",
-
-                    StatusId = 0,
-                    StatusName = ""
-                };
-
-                invoices.Add(invoice);
+                transaction.Commit();
+                return new ApiResponse { IsSuccess = true, Message = "Payment recorded successfully." };
             }
-
-            var summary = new InvoiceSummaryDto
+            catch (Exception ex)
             {
-                MonthlyRent = invoices.LastOrDefault()?.MonthlyRent ?? 0,
-                Pending = invoices.Sum(i => i.MonthlyRent - i.PaidAmount - i.DiscountAmount),
-                PreviousBalance = invoices
-                    .OrderBy(i => i.DueDate)
-                    .SkipLast(1)
-                    .Sum(i => i.MonthlyRent - i.PaidAmount - i.DiscountAmount),
-                TotalLateFee = invoices.Sum(i => i.IsLateFeeWaived ? 0 : i.LateFee)
-            };
-
-            return new InvoiceResponseDto
-            {
-                Invoices = invoices,
-                Summary = summary
-            };
+                transaction.Rollback();
+                return new ApiResponse { IsSuccess = false, Message = "Error occurred while recording payment. " + ex.Message };
+            }
         }
 
+        public async Task<DataTable> GetOccupancyAsync() => await _dal.GetOccupancyAsync();
+        public async Task<DataTable> GetVacantUnitsAsync(int? includeUnitId) => await _dal.GetVacantUnitsAsync(includeUnitId);
+        public async Task<decimal> GetUnitRentAsync(int unitId) => await _dal.GetUnitRentAsync(unitId);
 
-        //public async Task<DataTable> GetUnpaidInvoiceByTenant(int tenantId)
-        //{
-        //    return await _dal.GetUnpaidInvoiceByTenant(tenantId);
-        //}
+        public async Task<ApiResponse> ReverseLateFeeAsync(int invoiceId, string reason, int userId)
+        {
+            if (string.IsNullOrWhiteSpace(reason))
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "Reason is required." };
+            try
+            {
+                var dt = await _dal.ReverseLateFeeAsync(invoiceId, reason.Trim(), userId);
+                return Convert.ToDecimal(dt.Rows[0]["Fee"]) > 0
+                    ? new ApiResponse { IsSuccess = true, Message = "Late fee reversed." }
+                    : new ApiResponse { IsSuccess = false, ErrorMessage = "Nothing to reverse (no charged fee, or payments already cover it)." };
+            }
+            catch (Exception ex)
+            {
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "Error reversing late fee. " + ex.Message };
+            }
+        }
 
-        // Payments
-        //public async Task<ApiResponse> CreateRentAsync(List<Payments> payment)
-        //{
-        //    try
-        //    {
-        //        int result = await _dbHelper.ExecuteTransactionAsync(async (conn, transaction) =>
-        //        {
-        //            int rows1 = await _dal.CreateRentAsync(payment, conn, transaction);
-        //            if (rows1 == 0) throw new Exception("Failed to add payment.");
+        public async Task<ApiResponse> CreateRentAsync(List<Payments> payments, int userId) =>
+            await SubmitOrUpdatePayments(payments, userId);
 
-        //            int rows2 = await _dal.UpdateInvoiceAfterRentAsync(payment.RentInvoiceId, payment.PaymentAmount, conn, transaction);
-        //            if (rows2 == 0) throw new Exception("Failed to update invoice.");
+        public async Task<ApiResponse> UpdatePaymentsAsync(List<Payments> payments, int userId) =>
+            await SubmitOrUpdatePayments(payments, userId);
 
-        //            return 1; // success
-        //        });
-
-        //        return new ApiResponse { IsSuccess = true, Message = "Payment added and invoice updated successfully." };
-        //    }
-        //    catch (SqlException ex)
-        //    {
-        //        // Handle foreign key or other SQL errors specifically if needed
-        //        return new ApiResponse { IsSuccess = false, ErrorMessage = $"Database error: {ex.Message}" };
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        return new ApiResponse { IsSuccess = false, ErrorMessage = $"Error: {ex.Message}" };
-        //    }
-        //}
-
-        public async Task<ApiResponse> CreateRentAsync(List<Payments> payments, int userId)
+        public async Task<ApiResponse> CreatePaymentAdjustmentAsync(Payments payment, int userId)
         {
             try
             {
-                await _dbHelper.ExecuteTransactionAsync(async (conn, transaction) =>
+                var insertResult = await _dal.CreatePaymentAdjustmentAsync(payment, userId);
+                if (!insertResult.IsSuccess)
                 {
-                    foreach (var payment in payments)
+                    return new ApiResponse { IsSuccess = false, ErrorMessage = "Failed to record adjustment." };
+                }
+
+                // FIX: the original adjustment path only inserted into Payments and
+                // never touched RentInvoices — meaning an adjustment that fully paid
+                // off an invoice would never update its StatusId, and it would keep
+                // showing as Unpaid/Partial in the collections list forever.
+                await _dal.UpdateInvoiceAfterRentAsync(
+                    payment.RentInvoiceId,
+                    payment.PaymentAmount + payment.DiscountAmount);
+
+                return new ApiResponse { IsSuccess = true, Message = "Adjustment recorded." };
+            }
+            catch (Exception ex)
+            {
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "Error occurred while recording adjustment. " + ex.Message };
+            }
+        }
+
+        public async Task<ApiResponse> DeletePaymentAsync(int invoiceId)
+        {
+            try
+            {
+                var result = await _dal.DeleteLastPaymentForInvoice(invoiceId);
+                return result.IsSuccess
+                    ? new ApiResponse { IsSuccess = true, Message = "Last payment on this invoice was deleted." }
+                    : new ApiResponse { IsSuccess = false, ErrorMessage = "No payment found to delete for this invoice." };
+            }
+            catch (Exception ex)
+            {
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "Error occurred while deleting payment. " + ex.Message };
+            }
+        }
+
+        public async Task<ApiResponse> BulkUpdateDueDateAsync(List<int> invoiceIds, DateTime newDueDate)
+        {
+            try
+            {
+                var result = await _dal.BulkUpdateDueDateAsync(invoiceIds, newDueDate);
+                return result.IsSuccess
+                    ? new ApiResponse { IsSuccess = true, Message = $"Due date updated for {invoiceIds.Count} invoice(s)." }
+                    : new ApiResponse { IsSuccess = false, ErrorMessage = "Failed to update due dates." };
+            }
+            catch (Exception ex)
+            {
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "Error occurred while updating due dates. " + ex.Message };
+            }
+        }
+
+        public async Task<DataTable> GetActiveTenantsAsync() => await _dal.GetActiveTenantsList();
+
+        // ---------------- BULK INVOICE GENERATION (manual button) ----------------
+
+        // tenantIds: null or empty = all active tenants without an invoice yet
+        // this month. Otherwise, only the specified tenants (still skips anyone
+        // among them who already has one, so re-running is always safe).
+        public async Task<ApiResponse> GenerateInvoicesAsync(int month, int year, int dueInDays, List<int>? tenantIds)
+        {
+            try
+            {
+                var eligible = await _dal.GetActiveTenantsWithoutInvoiceForMonth(month, year);
+
+                var rowsToGenerate = (tenantIds == null || tenantIds.Count == 0)
+                    ? eligible.AsEnumerable()
+                    : eligible.AsEnumerable().Where(r => tenantIds.Contains(Convert.ToInt32(r["TenantId"])));
+
+                var rowList = rowsToGenerate.ToList();
+
+                if (rowList.Count == 0)
+                {
+                    return new ApiResponse
                     {
-                        var res = await _dal.CreateRentAsync(payment, userId, conn, transaction);
-                        if (!res.IsSuccess)
-                            throw new Exception("Failed to insert payment.");
+                        IsSuccess = true,
+                        RowsAffected = 0,
+                        Message = "No invoices to generate — selected tenant(s) already have one for this month.",
+                    };
+                }
 
-                        decimal effectivePayment = payment.PaymentAmount + payment.DiscountAmount;
+                var invoiceDate = new DateTime(year, month, 1);
+                var dueDate = invoiceDate.AddDays(dueInDays);
+                int created = 0;
 
-                        var res2 =
-                            await _dal.UpdateInvoiceAfterRentAsync(payment.RentInvoiceId, effectivePayment, conn, transaction);
+                foreach (var row in rowList)
+                {
+                    int tenantId = Convert.ToInt32(row["TenantId"]);
+                    decimal monthlyRent = Convert.ToDecimal(row["MonthlyRent"]);
 
-                        if (!res2.IsSuccess)
-                            throw new Exception("Failed to update invoice.");
-                    }
-
-                    return 1;
-                });
+                    var result = await _dal.CreateInvoice(tenantId, monthlyRent, invoiceDate, dueDate);
+                    if (result.IsSuccess) created++;
+                }
 
                 return new ApiResponse
                 {
                     IsSuccess = true,
-                    Message = "Payments processed successfully."
+                    RowsAffected = created,
+                    Message = $"{created} invoice(s) generated for {invoiceDate:MMMM yyyy}.",
                 };
             }
             catch (Exception ex)
             {
-                return new ApiResponse
-                {
-                    IsSuccess = false,
-                    ErrorMessage = ex.Message
-                };
+                return new ApiResponse { IsSuccess = false, Message = "Error occurred while generating invoices. " + ex.Message };
             }
         }
 
-        public async Task<ApiResponse> CreatePaymentAdjustmentAsync(Payments payments, int userId)
+        // ---------------- ONE-TIME EXTRA CHARGES ----------------
+
+        // Creates one standalone invoice per selected tenant for a one-off charge
+        // (Maintenance, Late Fine, Security Deposit, etc.) — separate from their
+        // regular monthly rent invoice, clearly labeled via Description/ChargeType.
+        public async Task<ApiResponse> CreateExtraChargeAsync(
+            List<int> tenantIds, int month, int year, string chargeType, string description, decimal amount, int dueInDays)
         {
             try
             {
-                var result = await _dal.CreatePaymentAdjustmentAsync(payments, userId);
+                if (tenantIds == null || tenantIds.Count == 0)
+                    return new ApiResponse { IsSuccess = false, ErrorMessage = "Select at least one tenant." };
 
-                if (result.IsSuccess)
-                    return new ApiResponse { IsSuccess = true, Message = "Payment adjusted successfully." };
+                if (amount <= 0)
+                    return new ApiResponse { IsSuccess = false, ErrorMessage = "Amount must be greater than zero." };
 
-                return new ApiResponse { IsSuccess = false, ErrorMessage = "Failed to save adjustment. Please try again." };
-            }
-            catch (Exception)
-            {
+                var invoiceDate = new DateTime(year, month, 1);
+                var dueDate = invoiceDate.AddDays(dueInDays);
+                int created = 0;
+
+                foreach (var tenantId in tenantIds)
+                {
+                    var result = await _dal.CreateInvoice(tenantId, amount, invoiceDate, dueDate, description, chargeType);
+                    if (result.IsSuccess) created++;
+                }
+
                 return new ApiResponse
                 {
-                    IsSuccess = false,
-                    ErrorMessage = "Error occurred while saving payment adjustment."
+                    IsSuccess = true,
+                    RowsAffected = created,
+                    Message = $"{chargeType} charge of {amount:C} added for {created} tenant(s).",
                 };
             }
+            catch (Exception ex)
+            {
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "Error occurred while adding the charge. " + ex.Message };
+            }
         }
 
-        public async Task<DataTable> GetRentCollectionAsync()
+
+        //Newly Added
+        public async Task<DataTable> GetAllPaymentsAsync(DateTime? from, DateTime? to) => await _dal.GetAllPaymentsAsync(from, to);
+
+        public async Task<ApiResponse> ChargeLateFeeAsync(int invoiceId)
         {
-            return await _dal.GetRentCollectionAsync();
-        }
-
-        //public async Task<InvoiceResponseDto> GetRentCollectionAsync()
-        //{
-        //    DataTable dt = await _dal.GetRentCollectionAsync();
-
-        //    var invoices = new List<InvoiceRowDto>();
-
-        //    foreach (DataRow row in dt.Rows)
-        //    {
-        //        // Core amounts
-        //        decimal monthlyRent = Convert.ToDecimal(row["MonthlyRent"]);
-        //        decimal paidAmount = Convert.ToDecimal(row["PaidAmount"] ?? 0);
-        //        decimal appliedDiscount = Convert.ToDecimal(row["AppliedDiscount"] ?? 0);
-        //        decimal remainingAmount = Convert.ToDecimal(row["RemainingAmount"] ?? 0);
-        //        DateTime dueDate = Convert.ToDateTime(row["DueDate"]);
-
-        //        // Calculate late fee only if there is remaining amount and past due date
-        //        decimal lateFee = 0;
-        //        if (remainingAmount > 0 && DateTime.UtcNow.Date > dueDate.Date)
-        //        {
-        //            // Optionally include any logic for waived late fee
-        //            bool isLateFeeWaived = row.Table.Columns.Contains("IsLateFeeWaived") &&
-        //                                   Convert.ToBoolean(row["IsLateFeeWaived"]);
-        //            if (!isLateFeeWaived)
-        //            {
-        //                lateFee = LateFeeCalculator.Calculate(remainingAmount, monthlyRent, dueDate, DateTime.UtcNow);
-        //            }
-        //        }
-
-        //        // Map invoice row
-        //        var invoice = new InvoiceRowDto
-        //        {
-        //            InvoiceId = row.GetInt("InvoiceId"),
-        //            TenantId = row.GetInt("TenantId"),
-        //            TenantName = row.GetString("TenantName"),
-        //            BuildingName = row.GetString("BuildingName"),
-        //            FloorNumber = row.GetString("FloorNumber"),
-        //            UnitNumber = row.GetString("UnitNumber"),
-
-        //            InvoiceDate = row.GetDateTime("InvoiceDate"),
-        //            MonthlyRent = monthlyRent,
-        //            DueDate = dueDate,
-        //            RemainingAmount = remainingAmount,
-        //            StatusName = row.GetString("StatusName"),
-
-        //            PaidAmount = paidAmount,
-        //            AppliedDiscount = appliedDiscount,
-        //            PaymentDate = row.GetNullableDateTime("LastPaymentDate"),
-
-        //            LateFee = lateFee
-        //        };
-
-        //        invoices.Add(invoice);
-        //    }
-
-        //    return new InvoiceResponseDto
-        //    {
-        //        Invoices = invoices
-        //    };
-        //}
-
-        public async Task<DataTable> GetPaymentHistoryAsync(int invoiceId)
-        {
-            return await _dal.GetPaymentHistoryAsync(invoiceId);
-        }
-
-        // Bulk operations
-        public async Task<ApiResponse> BulkUpdateDueDateAsync(List<int> invoiceIds, DateTime newDueDate)
-        {
-            if (invoiceIds == null || invoiceIds.Count == 0)
-                return new ApiResponse { IsSuccess = false, ErrorMessage = "Invoice list cannot be empty." };
-
             try
             {
-                var res = await _dal.BulkUpdateDueDateAsync(invoiceIds, newDueDate);
-                if (res.IsSuccess)
-                    return new ApiResponse { IsSuccess = true, Message = "Due dates updated successfully." };
-
-                return new ApiResponse { IsSuccess = false, ErrorMessage = "No matching invoices were found to update." };
+                var dt = await _dal.ChargeLateFeeAsync(invoiceId);
+                var fee = Convert.ToDecimal(dt.Rows[0]["Fee"]);
+                return fee > 0
+                    ? new ApiResponse { IsSuccess = true, Message = $"Late fee of {fee:N0} charged." }
+                    : new ApiResponse { IsSuccess = false, ErrorMessage = "Late fee is not applicable or was already charged." };
             }
-            catch (SqlException)
+            catch (Exception ex)
             {
-                return new ApiResponse { IsSuccess = false, ErrorMessage = "Unable to update due date. Please try again." };
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "Error charging late fee. " + ex.Message };
             }
         }
     }

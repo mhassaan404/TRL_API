@@ -47,10 +47,6 @@ namespace TRL_API.Services
             rng.GetBytes(randomBytes);
             return Convert.ToBase64String(randomBytes);
 
-            //var randomBytes = new byte[64];
-            //using var rng = new System.Security.Cryptography.RNGCryptoServiceProvider();
-            //rng.GetBytes(randomBytes);
-            //return Convert.ToBase64String(randomBytes);
         }
     }
 }

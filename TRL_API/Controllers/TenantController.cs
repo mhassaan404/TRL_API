@@ -11,8 +11,8 @@ namespace TRL_API.Controllers
     [ApiController]
     public class TenantController : ControllerBase
     {
-        private readonly TenantService _service;
-        public TenantController(TenantService service)
+        private readonly ITenantService _service;
+        public TenantController(ITenantService service)
         {
             _service = service;
         }
@@ -21,42 +21,6 @@ namespace TRL_API.Controllers
         public async Task<IActionResult> GetTenants()
         {
             var data = await _service.GetTenants();
-            var list = DataTableHelper.ToDictionaryList(data);
-            return Ok(list);
-        }
-
-        [HttpGet("GetBuildings")]
-        public async Task<IActionResult> GetBuildings()
-        {
-            var data = await _service.GetBuildings();
-            var list = DataTableHelper.ToDictionaryList(data);
-            return Ok(list);
-        }
-
-        [HttpGet("GetFloorsByBuilding")]
-        public async Task<IActionResult> GetFloorsByBuilding([FromQuery] int? buildingId)
-        {
-            if (!buildingId.HasValue) return BadRequest("BuildingId is required");
-
-            var data = await _service.GetFloors(buildingId);
-            var list = DataTableHelper.ToDictionaryList(data);
-            return Ok(list);
-        }
-
-        [HttpGet("GetUnitsByFloor")]
-        public async Task<IActionResult> GetUnitsByFloor([FromQuery] int? floorId)
-        {
-            if (!floorId.HasValue) return BadRequest("FloorId is required");
-
-            var data = await _service.GetUnits(floorId);
-            var list = DataTableHelper.ToDictionaryList(data);
-            return Ok(list);
-        }
-
-        [HttpGet("GetCities")]
-        public async Task<IActionResult> GetCities()
-        {
-            var data = await _service.GetCities();
             var list = DataTableHelper.ToDictionaryList(data);
             return Ok(list);
         }
@@ -94,7 +58,7 @@ namespace TRL_API.Controllers
             if (tenantId <= 0)
                 return BadRequest(new ApiResponse { IsSuccess = false, Message = "TenantId is required." });
 
-            var response = await _service.DeleteTenantAsync(tenantId);
+            var response = await _service.DeleteTenantAsync(tenantId, User.GetUserId());
 
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }

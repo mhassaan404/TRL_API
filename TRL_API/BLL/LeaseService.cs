@@ -4,10 +4,10 @@ using TRL_API.Models;
 
 namespace TRL_API.BLL
 {
-    public class LeaseService
+    public class LeaseService : ILeaseService
     {
-        private readonly LeaseRepository _dal;
-        public LeaseService(LeaseRepository dal) => _dal = dal;
+        private readonly ILeaseRepository _dal;
+        public LeaseService(ILeaseRepository dal) => _dal = dal;
 
         public async Task<DataTable> GetAllAsync() => await _dal.GetAllAsync();
         public async Task<DataTable> GetByTenantAsync(int tenantId) => await _dal.GetByTenantAsync(tenantId);
@@ -20,6 +20,10 @@ namespace TRL_API.BLL
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "Rent must be greater than zero." };
             if (lease.TenureMonths <= 0)
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "Tenure must be at least 1 month." };
+
+            var billedThrough = await _dal.GetOverlappingBilledThroughAsync(lease.UnitId, lease.StartDate);
+            if (billedThrough != null)
+                return new ApiResponse { IsSuccess = false, ErrorMessage = $"This unit is billed to an earlier lease through {billedThrough:dd MMM yyyy}. Start the new lease after that date." };
 
             try
             {
@@ -38,9 +42,22 @@ namespace TRL_API.BLL
         {
             if (req.TenureMonths <= 0)
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "Tenure must be at least 1 month." };
+            // null keeps the current rent; an explicit 0 or negative would create a lease that is never billed
+            if (req.NewRentAmount is <= 0)
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "New rent must be greater than zero (leave it empty to keep the current rent)." };
             return await _dal.RenewAsync(req, userId);
         }
 
-        public async Task<ApiResponse> TerminateAsync(TerminateLeaseRequest req) => await _dal.TerminateAsync(req);
+        public async Task<ApiResponse> TerminateAsync(TerminateLeaseRequest req, int userId)
+        {
+            var moveOut = req.MoveOutDate?.Date ?? DateTime.Today;
+            if (moveOut > DateTime.Today)
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "Move-out date can't be in the future. End the lease on the day the tenant leaves." };
+
+            var result = await _dal.TerminateAsync(req, moveOut, userId);
+            return result.IsSuccess
+                ? new ApiResponse { IsSuccess = true, Message = $"Lease ended. Rent is billed through {moveOut:dd MMM yyyy}." }
+                : new ApiResponse { IsSuccess = false, ErrorMessage = "Active lease not found." };
+        }
     }
 }

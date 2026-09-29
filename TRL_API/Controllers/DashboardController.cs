@@ -14,8 +14,8 @@ namespace TRL_API.Controllers
     [ApiController]
     public class DashboardController : ControllerBase
     {
-        private readonly DashboardService _service;
-        public DashboardController(DashboardService service)
+        private readonly IDashboardService _service;
+        public DashboardController(IDashboardService service)
         {
             _service = service;
         }

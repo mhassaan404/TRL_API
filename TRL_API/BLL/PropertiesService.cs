@@ -1,231 +1,3 @@
-﻿//using Microsoft.Data.SqlClient;
-//using System.Data;
-//using TRL_API.DAL;
-//using TRL_API.Models;
-
-//namespace TRL_API.BLL
-//{
-//    public class PropertiesService
-//    {
-//        private readonly PropertiesRepository _dal;
-
-//        public PropertiesService(PropertiesRepository dal)
-//        {
-//            _dal = dal;
-//        }
-
-//        public async Task<DataTable> GetProperties()
-//        {
-//            return await _dal.GetProperties();
-//        }
-
-//        public async Task<DataTable> GetBuildings()
-//        {
-//            return await _dal.GetBuildings();
-//        }
-
-//        public async Task<DataTable> GetFloorsByBuilding(int buildingId)
-//        {
-//            return await _dal.GetFloorsByBuilding(buildingId);
-//        }
-
-//        public async Task<DataTable> GetUnitsByFloor(int floorId)
-//        {
-//            return await _dal.GetUnitsByFloor(floorId);
-//        }
-
-//        public async Task<DataTable> GetUnitsStatus()
-//        {
-//            return await _dal.GetUnitsStatus();
-//        }
-
-//        public async Task<ApiResponse> SaveBuilding(string? buildingName, int cityId, int typeId, string? address)
-//        {
-//            try
-//            {
-//                var result = await _dal.SaveBuilding(buildingName, cityId, typeId, address);
-
-//                if (result.IsSuccess)
-//                {
-//                    return new ApiResponse
-//                    {
-//                        IsSuccess = true,
-//                        Message = "Building saved successfully."
-//                    };
-//                }
-
-//                return new ApiResponse
-//                {
-//                    IsSuccess = false,
-//                    Message = "Failed to save building."
-//                };
-//            }
-//            catch (Exception ex)
-//            {
-//                return new ApiResponse
-//                {
-//                    IsSuccess = false,
-//                    Message = "Error occurred while saving building. " + ex.Message
-//                };
-//            }
-//        }
-//        public async Task<ApiResponse> SaveFloor(int buildingId, int floorNumber)
-//        {
-//            try
-//            {
-//                var result = await _dal.SaveFloor(buildingId, floorNumber);
-
-//                if (result.IsSuccess)
-//                {
-//                    return new ApiResponse
-//                    {
-//                        IsSuccess = true,
-//                        Message = "Floor saved successfully."
-//                    };
-//                }
-
-//                return new ApiResponse
-//                {
-//                    IsSuccess = false,
-//                    Message = "Failed to save floor."
-//                };
-//            }
-//            catch (Exception ex)
-//            {
-//                return new ApiResponse
-//                {
-//                    IsSuccess = false,
-//                    Message = "Error occurred while saving floor. " + ex.Message
-//                };
-//            }
-//        }
-
-//        public async Task<ApiResponse> SaveUnit(int floorId, int buildingId, int unitNumber,
-//            int statusId, double baseRent, string? note)
-//        {
-//            try
-//            {
-//                var result = await _dal.SaveUnit(floorId, buildingId, unitNumber,
-//                    statusId, baseRent, note);
-
-//                if (result.IsSuccess)
-//                {
-//                    return new ApiResponse
-//                    {
-//                        IsSuccess = true,
-//                        Message = "Unit saved successfully."
-//                    };
-//                }
-
-//                return new ApiResponse
-//                {
-//                    IsSuccess = false,
-//                    Message = "Failed to save unit."
-//                };
-//            }
-//            catch (SqlException ex) when (ex.Number == 547)
-//            {
-//                return new ApiResponse
-//                {
-//                    IsSuccess = false,
-//                    Message = "Cannot save unit because the related building or floor does not exist."
-//                };
-//            }
-//            catch (Exception ex)
-//            {
-//                return new ApiResponse
-//                {
-//                    IsSuccess = false,
-//                    Message = "Error occurred while saving unit. " + ex.Message
-//                };
-//            }
-//        }
-
-//        public async Task<ApiResponse> UpdateUnit(int unitId, int floorId, int buildingId,
-//            int unitNumber, int statusId, double baseRent, string? note)
-//        {
-//            try
-//            {
-//                var result = await _dal.UpdateUnit(unitId, floorId, buildingId,
-//                    unitNumber, statusId, baseRent, note);
-
-//                if (result.IsSuccess)
-//                {
-//                    return new ApiResponse
-//                    {
-//                        IsSuccess = true,
-//                        Message = "Unit updated successfully."
-//                    };
-//                }
-
-//                return new ApiResponse
-//                {
-//                    IsSuccess = false,
-//                    Message = "Unit not found or update failed."
-//                };
-//            }
-//            catch (SqlException ex) when (ex.Number == 547)
-//            {
-//                return new ApiResponse
-//                {
-//                    IsSuccess = false,
-//                    Message = "Cannot update unit because the related building or floor does not exist."
-//                };
-//            }
-//            catch (Exception ex)
-//            {
-//                return new ApiResponse
-//                {
-//                    IsSuccess = false,
-//                    Message = "Error occurred while updating unit. " + ex.Message
-//                };
-//            }
-//        }
-
-//        public async Task<ApiResponse> DeleteUnitAsync(int unitId)
-//        {
-//            try
-//            {
-//                var result = await _dal.DeleteUnit(unitId);
-
-//                if (result.IsSuccess)
-//                {
-//                    return new ApiResponse
-//                    {
-//                        IsSuccess = true,
-//                        Message = "Unit deleted successfully."
-//                    };
-//                }
-
-//                return new ApiResponse
-//                {
-//                    IsSuccess = false,
-//                    Message = "Unit not found or already deleted."
-//                };
-//            }
-//            catch (SqlException ex) when (ex.Number == 547)
-//            {
-//                return new ApiResponse
-//                {
-//                    IsSuccess = false,
-//                    Message = "Cannot delete unit because it is referenced in another record."
-//                };
-//            }
-//            catch (Exception ex)
-//            {
-//                return new ApiResponse
-//                {
-//                    IsSuccess = false,
-//                    Message = "Error occurred while deleting unit. " + ex.Message
-//                };
-//            }
-//        }
-//    }
-//}
-
-
-
-
 using Microsoft.Data.SqlClient;
 using System.Data;
 using TRL_API.DAL;
@@ -233,11 +5,11 @@ using TRL_API.Models;
 
 namespace TRL_API.BLL
 {
-    public class PropertiesService
+    public class PropertiesService : IPropertiesService
     {
-        private readonly PropertiesRepository _dal;
+        private readonly IPropertiesRepository _dal;
 
-        public PropertiesService(PropertiesRepository dal)
+        public PropertiesService(IPropertiesRepository dal)
         {
             _dal = dal;
         }
@@ -254,6 +26,8 @@ namespace TRL_API.BLL
 
         public async Task<ApiResponse> SaveBuilding(string? buildingName, int cityId, int typeId, string? address)
         {
+            if (string.IsNullOrWhiteSpace(buildingName))
+                return new ApiResponse { IsSuccess = false, Message = "Building name is required." };
             try
             {
                 var result = await _dal.SaveBuilding(buildingName, cityId, typeId, address);
@@ -261,14 +35,16 @@ namespace TRL_API.BLL
                     ? new ApiResponse { IsSuccess = true, Id = result.Id, Message = "Building saved successfully." }
                     : new ApiResponse { IsSuccess = false, Message = "Failed to save building." };
             }
-            catch (Exception ex)
+            catch (SqlException ex) when (ex.Number is 2601 or 2627)
             {
-                return new ApiResponse { IsSuccess = false, Message = "Error occurred while saving building. " + ex.Message };
+                return new ApiResponse { IsSuccess = false, Message = $"A building named \"{buildingName.Trim()}\" already exists." };
             }
         }
 
         public async Task<ApiResponse> UpdateBuilding(int buildingId, string? buildingName, int cityId, int typeId, string? address)
         {
+            if (string.IsNullOrWhiteSpace(buildingName))
+                return new ApiResponse { IsSuccess = false, Message = "Building name is required." };
             try
             {
                 var result = await _dal.UpdateBuilding(buildingId, buildingName, cityId, typeId, address);
@@ -276,9 +52,9 @@ namespace TRL_API.BLL
                     ? new ApiResponse { IsSuccess = true, Message = "Building updated successfully." }
                     : new ApiResponse { IsSuccess = false, Message = "Building not found or update failed." };
             }
-            catch (Exception ex)
+            catch (SqlException ex) when (ex.Number is 2601 or 2627)
             {
-                return new ApiResponse { IsSuccess = false, Message = "Error occurred while updating building. " + ex.Message };
+                return new ApiResponse { IsSuccess = false, Message = $"A building named \"{buildingName.Trim()}\" already exists." };
             }
         }
 
@@ -295,41 +71,51 @@ namespace TRL_API.BLL
             {
                 return new ApiResponse { IsSuccess = false, Message = "Cannot delete building because it has floors/units referencing it." };
             }
-            catch (Exception ex)
-            {
-                return new ApiResponse { IsSuccess = false, Message = "Error occurred while deleting building. " + ex.Message };
-            }
         }
 
         // ---------------- FLOOR ----------------
 
-        public async Task<ApiResponse> SaveFloor(int buildingId, int floorNumber)
+        // Floor and unit numbers are text ("G", "1", "B1", "A-101"): required, at most 50 characters
+        private static string? LabelError(string value, string label) =>
+            string.IsNullOrWhiteSpace(value) ? $"{label} is required."
+            : value.Trim().Length > 50 ? $"{label} can be at most 50 characters."
+            : null;
+
+        public async Task<ApiResponse> SaveFloor(int buildingId, string floorNumber)
         {
+            if (LabelError(floorNumber, "Floor number") is string err)
+                return new ApiResponse { IsSuccess = false, Message = err };
             try
             {
-                var result = await _dal.SaveFloor(buildingId, floorNumber);
+                var result = await _dal.SaveFloor(buildingId, floorNumber.Trim());
                 return result.IsSuccess
                     ? new ApiResponse { IsSuccess = true, Id = result.Id, Message = "Floor saved successfully." }
                     : new ApiResponse { IsSuccess = false, Message = "Failed to save floor." };
             }
-            catch (Exception ex)
+            catch (SqlException ex) when (ex.Number is 2601 or 2627)
             {
-                return new ApiResponse { IsSuccess = false, Message = "Error occurred while saving floor. " + ex.Message };
+                return new ApiResponse { IsSuccess = false, Message = $"This building already has floor \"{floorNumber.Trim()}\"." };
+            }
+            catch (SqlException ex) when (ex.Number == 547)
+            {
+                return new ApiResponse { IsSuccess = false, Message = "The selected building does not exist." };
             }
         }
 
-        public async Task<ApiResponse> UpdateFloor(int floorId, int floorNumber)
+        public async Task<ApiResponse> UpdateFloor(int floorId, string floorNumber)
         {
+            if (LabelError(floorNumber, "Floor number") is string err)
+                return new ApiResponse { IsSuccess = false, Message = err };
             try
             {
-                var result = await _dal.UpdateFloor(floorId, floorNumber);
+                var result = await _dal.UpdateFloor(floorId, floorNumber.Trim());
                 return result.IsSuccess
                     ? new ApiResponse { IsSuccess = true, Message = "Floor updated successfully." }
                     : new ApiResponse { IsSuccess = false, Message = "Floor not found or update failed." };
             }
-            catch (Exception ex)
+            catch (SqlException ex) when (ex.Number is 2601 or 2627)
             {
-                return new ApiResponse { IsSuccess = false, Message = "Error occurred while updating floor. " + ex.Message };
+                return new ApiResponse { IsSuccess = false, Message = $"This building already has floor \"{floorNumber.Trim()}\"." };
             }
         }
 
@@ -346,17 +132,18 @@ namespace TRL_API.BLL
             {
                 return new ApiResponse { IsSuccess = false, Message = "Cannot delete floor because it has units referencing it." };
             }
-            catch (Exception ex)
-            {
-                return new ApiResponse { IsSuccess = false, Message = "Error occurred while deleting floor. " + ex.Message };
-            }
         }
 
         // ---------------- UNIT ----------------
 
-        public async Task<ApiResponse> SaveUnit(int floorId, int buildingId, int unitNumber,
+        public async Task<ApiResponse> SaveUnit(int floorId, int buildingId, string unitNumber,
             int statusId, double baseRent, string? note, string? propertyType)
         {
+            if (LabelError(unitNumber, "Unit number") is string err)
+                return new ApiResponse { IsSuccess = false, Message = err };
+            if (baseRent < 0)
+                return new ApiResponse { IsSuccess = false, Message = "Base rent can't be negative." };
+            unitNumber = unitNumber.Trim();
             try
             {
                 var result = await _dal.SaveUnit(floorId, buildingId, unitNumber, statusId, baseRent, note, propertyType);
@@ -364,19 +151,24 @@ namespace TRL_API.BLL
                     ? new ApiResponse { IsSuccess = true, Id = result.Id, Message = "Unit saved successfully." }
                     : new ApiResponse { IsSuccess = false, Message = "Failed to save unit." };
             }
+            catch (SqlException ex) when (ex.Number is 2601 or 2627)
+            {
+                return new ApiResponse { IsSuccess = false, Message = $"This floor already has unit \"{unitNumber}\"." };
+            }
             catch (SqlException ex) when (ex.Number == 547)
             {
                 return new ApiResponse { IsSuccess = false, Message = "Cannot save unit because the related building or floor does not exist." };
             }
-            catch (Exception ex)
-            {
-                return new ApiResponse { IsSuccess = false, Message = "Error occurred while saving unit. " + ex.Message };
-            }
         }
 
         public async Task<ApiResponse> UpdateUnit(int unitId, int floorId, int buildingId,
-            int unitNumber, int statusId, double baseRent, string? note, string? propertyType)
+            string unitNumber, int statusId, double baseRent, string? note, string? propertyType)
         {
+            if (LabelError(unitNumber, "Unit number") is string err)
+                return new ApiResponse { IsSuccess = false, Message = err };
+            if (baseRent < 0)
+                return new ApiResponse { IsSuccess = false, Message = "Base rent can't be negative." };
+            unitNumber = unitNumber.Trim();
             try
             {
                 var result = await _dal.UpdateUnit(unitId, floorId, buildingId, unitNumber, statusId, baseRent, note, propertyType);
@@ -384,13 +176,13 @@ namespace TRL_API.BLL
                     ? new ApiResponse { IsSuccess = true, Message = "Unit updated successfully." }
                     : new ApiResponse { IsSuccess = false, Message = "Unit not found or update failed." };
             }
+            catch (SqlException ex) when (ex.Number is 2601 or 2627)
+            {
+                return new ApiResponse { IsSuccess = false, Message = $"This floor already has unit \"{unitNumber}\"." };
+            }
             catch (SqlException ex) when (ex.Number == 547)
             {
                 return new ApiResponse { IsSuccess = false, Message = "Cannot update unit because the related building or floor does not exist." };
-            }
-            catch (Exception ex)
-            {
-                return new ApiResponse { IsSuccess = false, Message = "Error occurred while updating unit. " + ex.Message };
             }
         }
 
@@ -406,10 +198,6 @@ namespace TRL_API.BLL
             catch (SqlException ex) when (ex.Number == 547)
             {
                 return new ApiResponse { IsSuccess = false, Message = "Cannot delete unit because it is referenced in another record." };
-            }
-            catch (Exception ex)
-            {
-                return new ApiResponse { IsSuccess = false, Message = "Error occurred while deleting unit. " + ex.Message };
             }
         }
     }

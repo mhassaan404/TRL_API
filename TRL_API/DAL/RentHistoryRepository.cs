@@ -5,7 +5,7 @@ using TRL_API.Models;
 
 namespace TRL_API.DAL
 {
-    public class RentHistoryRepository
+    public class RentHistoryRepository : IRentHistoryRepository
     {
         private readonly DbHelper _dbHelper;
 
@@ -14,134 +14,26 @@ namespace TRL_API.DAL
             _dbHelper = dbHelper;
         }
 
-        //public async Task<DataTable> GetHistoryAsync()
-        //{
-        //    string query = @"
-        //        SELECT 
-        //            ri.Id AS invoiceId,
-        //            ri.InvoiceDate,
-        //            t.Name AS Tenant,
-        //            u.UnitNumber AS Unit,
-        //            ri.TotalRent AS MonthlyRent,
-        //            MAX(p.PaymentDate) AS LastPaymentDate,
-
-        //            COALESCE(
-        //                STUFF((
-        //                    SELECT DISTINCT ', ' + p2.PaymentMethod
-        //                    FROM Payments p2
-        //                    WHERE p2.RentInvoiceId = ri.Id
-        //                    FOR XML PATH('')
-        //                ), 1, 2, ''),
-        //                'N/A'
-        //            ) AS PaymentMethod,
-
-        //            COALESCE(sl.StatusName, 'Unknown') AS Status
-        //        FROM RentInvoices ri
-        //        INNER JOIN Tenants t 
-        //            ON ri.TenantId = t.TenantId
-        //        LEFT JOIN Units u 
-        //            ON t.UnitId = u.UnitId
-        //        LEFT JOIN Payments p 
-        //            ON ri.Id = p.RentInvoiceId
-        //        LEFT JOIN StatusList sl 
-        //            ON ri.StatusId = sl.StatusId
-
-        //        GROUP BY 
-        //            ri.Id,
-        //            ri.InvoiceDate,
-        //            t.Name,
-        //            u.UnitNumber,
-        //            ri.TotalRent,
-        //            sl.StatusName
-
-        //        ORDER BY ri.InvoiceDate DESC;";
-
-        //    return await _dbHelper.ExecuteQueryReturnDataTableAsync(query);
-        //}
-
-        //public async Task<ApiResponse> CancelInvoice(int invoiceId)
-        //{
-        //    string query = @"
-        //        UPDATE RentInvoices
-        //        SET StatusId = 6
-        //        WHERE Id = @InvoiceId
-        //          AND StatusId <> 6;";
-
-        //    var parameters = new[]
-        //    {
-        //        new SqlParameter("@InvoiceId", invoiceId)
-        //    };
-        //    return await _dbHelper.ExecuteQueryAsync(query, parameters);
-        //}
-
-        //public async Task<ApiResponse> ReinstateInvoice(int invoiceId)
-        //{
-        //    string query = @"
-        //        UPDATE ri
-        //        SET
-        //            PendingAmount = CASE
-        //                WHEN (ri.TotalRent - ISNULL(pt.Paid, 0) - ISNULL(pt.Disc, 0)) < 0
-        //                    THEN 0
-        //                ELSE (ri.TotalRent - ISNULL(pt.Paid, 0) - ISNULL(pt.Disc, 0))
-        //            END,
-
-        //            OverPaidAmount = CASE
-        //                WHEN (ri.TotalRent - ISNULL(pt.Paid, 0) - ISNULL(pt.Disc, 0)) < 0
-        //                    THEN ABS(ri.TotalRent - ISNULL(pt.Paid, 0) - ISNULL(pt.Disc, 0))
-        //                ELSE 0
-        //            END,
-
-        //            StatusId = CASE
-        //                WHEN (ri.TotalRent - ISNULL(pt.Paid, 0) - ISNULL(pt.Disc, 0)) < 0 THEN 9
-        //                WHEN (ri.TotalRent - ISNULL(pt.Paid, 0) - ISNULL(pt.Disc, 0)) = 0 THEN 1
-        //                WHEN (ri.TotalRent - ISNULL(pt.Paid, 0) - ISNULL(pt.Disc, 0)) < ri.TotalRent THEN 8
-        //                ELSE 2
-        //            END
-
-        //        FROM RentInvoices ri
-
-        //        OUTER APPLY (
-        //            SELECT
-        //                SUM(PaymentAmount) AS Paid,
-        //                SUM(DiscountAmount) AS Disc
-        //            FROM Payments
-        //            WHERE RentInvoiceId = ri.Id
-        //        ) pt
-
-        //        WHERE ri.Id = @InvoiceId
-        //          AND ri.StatusId = 6;";
-
-        //    var parameters = new[]
-        //    {
-        //        new SqlParameter("@InvoiceId", invoiceId)
-        //    };
-
-        //    return await _dbHelper.ExecuteQueryAsync(query, parameters);
-        //}
 
         public async Task<DataTable> GetHistoryAsync()
         {
             string query = @"
                 SELECT ri.Id AS invoiceId, ri.InvoiceDate, t.Name AS Tenant, u.UnitNumber AS Unit,
                        ri.TotalRent AS MonthlyRent, ri.LateFeeCharged, ri.ChargeType,
-                       pt.Paid AS PaidAmount, pt.Disc AS DiscountAmount,
-                       CASE WHEN ri.StatusId = 6 THEN 0
-                            ELSE ri.TotalRent + ri.LateFeeCharged - pt.Paid - pt.Disc END AS Balance,
-                       pt.LastPaymentDate,
+                       bal.Paid AS PaidAmount, bal.Disc AS DiscountAmount,
+                       CASE WHEN ri.StatusId = 6 THEN 0 ELSE bal.Balance END AS Balance,
+                       bal.LastPaymentDate,
                        COALESCE(pt.Methods, 'N/A') AS PaymentMethod,
                        COALESCE(sl.StatusName, 'Unknown') AS Status
                 FROM RentInvoices ri
                 INNER JOIN Tenants t ON ri.TenantId = t.TenantId
-                LEFT JOIN Units u ON t.UnitId = u.UnitId
+                LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
                 LEFT JOIN StatusList sl ON ri.StatusId = sl.StatusId
+                CROSS APPLY dbo.InvoiceBalance(ri.Id, 0) bal
                 OUTER APPLY (
-                    SELECT ISNULL(SUM(p.PaymentAmount), 0) AS Paid,
-                           ISNULL(SUM(p.DiscountAmount), 0) AS Disc,
-                           MAX(p.PaymentDate) AS LastPaymentDate,
-                           STUFF((SELECT DISTINCT ', ' + p2.PaymentMethod FROM Payments p2
+                    SELECT STUFF((SELECT DISTINCT ', ' + p2.PaymentMethod FROM Payments p2
                                   WHERE p2.RentInvoiceId = ri.Id AND p2.PaymentMethod IS NOT NULL
                                   FOR XML PATH('')), 1, 2, '') AS Methods
-                    FROM Payments p WHERE p.RentInvoiceId = ri.Id
                 ) pt
                 ORDER BY ri.InvoiceDate DESC, ri.Id DESC;";
             return await _dbHelper.ExecuteQueryReturnDataTableAsync(query);
@@ -175,24 +67,40 @@ namespace TRL_API.DAL
 
         public async Task<ApiResponse> ReinstateInvoice(int invoiceId)
         {
+            // A lease rent invoice for a month at/after the lease's billing end can only come back if the lease still
+            // covers part of that month, and is re-priced to what it covered (so a month after move-out can't return).
             string query = @"
+                SET XACT_ABORT ON;
+                DECLARE @Ok BIT = 0, @NewAmount DECIMAL(18,2), @Descr NVARCHAR(200), @Reprice BIT = 0;
+                SELECT @Ok = CASE WHEN ri.LeaseId IS NULL OR ri.ChargeType IS NOT NULL OR l.BilledThrough IS NULL
+                                       OR ri.InvoiceMonth < DATEFROMPARTS(YEAR(l.BilledThrough), MONTH(l.BilledThrough), 1)
+                                       OR c.Amount > 0 THEN 1 ELSE 0 END,
+                       @Reprice = CASE WHEN ri.LeaseId IS NOT NULL AND ri.ChargeType IS NULL AND l.BilledThrough IS NOT NULL
+                                       AND ri.InvoiceMonth >= DATEFROMPARTS(YEAR(l.BilledThrough), MONTH(l.BilledThrough), 1)
+                                       THEN 1 ELSE 0 END,
+                       @NewAmount = c.Amount, @Descr = c.Descr
+                FROM RentInvoices ri
+                LEFT JOIN TenantLeases l ON l.LeaseId = ri.LeaseId
+                OUTER APPLY dbo.LeaseMonthCharge(ri.LeaseId, ri.InvoiceMonth) c
+                WHERE ri.Id = @InvoiceId AND ri.StatusId = 6;
+
+                IF @Ok = 0 BEGIN SELECT 'NOT_ALLOWED' AS Result; RETURN; END
+
+                BEGIN TRAN;
+                IF @Reprice = 1
+                    UPDATE RentInvoices SET TotalRent = @NewAmount, Description = @Descr WHERE Id = @InvoiceId;
+
                 INSERT INTO InvoiceAudit(InvoiceId, Action)
                 SELECT Id, 'REINSTATED' FROM RentInvoices WHERE Id = @InvoiceId AND StatusId = 6;
 
-                UPDATE ri SET
-                    PendingAmount  = CASE WHEN x.Bal < 0 THEN 0 ELSE x.Bal END,
-                    OverPaidAmount = CASE WHEN x.Bal < 0 THEN -x.Bal ELSE 0 END,
-                    StatusId = CASE WHEN x.Bal < 0 THEN 9
-                                    WHEN x.Bal = 0 THEN 1
-                                    WHEN p.Paid + p.Disc > 0 THEN 8
-                                    ELSE 2 END
-                FROM RentInvoices ri
-                OUTER APPLY (SELECT ISNULL(SUM(PaymentAmount),0) AS Paid, ISNULL(SUM(DiscountAmount),0) AS Disc
-                             FROM Payments WHERE RentInvoiceId = ri.Id) p
-                CROSS APPLY (SELECT ri.TotalRent + ri.LateFeeCharged - p.Paid - p.Disc AS Bal) x
-                WHERE ri.Id = @InvoiceId AND ri.StatusId = 6;";
+                " + InvoiceSql.Recalc + @"
+                WHERE ri.Id = @InvoiceId AND ri.StatusId = 6;
+                COMMIT;
+                SELECT 'OK' AS Result;";
 
-            return await _dbHelper.ExecuteQueryAsync(query, new[] { new SqlParameter("@InvoiceId", invoiceId) });
+            // Explicit result: the lookup SELECT above would make a row-count based success check unreliable
+            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query, new[] { new SqlParameter("@InvoiceId", invoiceId) });
+            return new ApiResponse { IsSuccess = dt.Rows.Count > 0 && dt.Rows[0]["Result"].ToString() == "OK" };
         }
     }
 }

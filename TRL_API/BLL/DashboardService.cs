@@ -3,10 +3,10 @@ using TRL_API.DAL;
 
 namespace TRL_API.BLL
 {
-    public class DashboardService
+    public class DashboardService : IDashboardService
     {
-        private readonly DashboardRepository _dal;
-        public DashboardService(DashboardRepository dal)
+        private readonly IDashboardRepository _dal;
+        public DashboardService(IDashboardRepository dal)
         {
             _dal = dal;
         }

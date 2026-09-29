@@ -4,54 +4,13 @@ using TRL_API.Data;
 
 namespace TRL_API.DAL
 {
-    public class DashboardRepository
+    public class DashboardRepository : IDashboardRepository
     {
         private readonly DbHelper _dbHelper;
 
         public DashboardRepository(DbHelper dbHelper)
         {
             _dbHelper = dbHelper;
-        }
-
-        public async Task<DataTable> GetData(string month)
-        {
-            string query = @"
-            SELECT 
-                B.BuildingName,
-                F.FloorNumber,
-                U.UnitNumber,
-                U.BaseRent AS UnitRent,
-            	COALESCE(T.Name, '') TenantName,
-                R.[Month],
-                CASE 
-                    WHEN TenantCount > 0 THEN CEILING(U.BaseRent / TenantCount)
-                    ELSE 0
-                END AS TotalRentPerTenant,
-                COALESCE(R.PaidAmount, 0) PaidAmount,
-                COALESCE(R.PendingAmount, 0) PendingAmount,
-                COALESCE(R.Status, '') Status
-            FROM Units U
-            JOIN Floors F ON F.FloorId = U.FloorId
-            JOIN Buildings B ON B.BuildingId = F.BuildingId
-            LEFT JOIN Tenants T ON T.UnitId = U.UnitId
-            LEFT JOIN RentInvoices R ON R.TenantId = T.TenantId
-            OUTER APPLY (
-                SELECT COUNT(*) AS TenantCount
-                FROM Tenants t2
-                JOIN RentInvoices r2 ON r2.TenantId = t2.TenantId
-                WHERE t2.UnitId = U.UnitId
-                  AND r2.[Month] = R.[Month]
-            ) AS TC
-            where R.[Month]=@Month
-            ORDER BY B.BuildingName, F.FloorNumber, U.UnitNumber, R.[Month] DESC;";
-
-            SqlParameter[] parameters =
-            {
-                new SqlParameter("@Month", string.IsNullOrEmpty(month) ? DBNull.Value : month)
-            };
-
-            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters);
-            return dt;
         }
 
         public async Task<DataTable> GetDashboardData()
@@ -65,26 +24,28 @@ namespace TRL_API.DAL
                 WHERE v.type = 'P' AND v.number BETWEEN 0 AND 6
             )
             
-            SELECT 
+            -- Payments are totalled per invoice first so an invoice's rent is counted once, not once per payment.
+            -- Cancelled invoices (StatusId 6) are excluded; charged late fees count as amounts due.
+            SELECT
                 FORMAT(M.MonthStart, 'yyyy-MM') AS MonthYear,
-            
+
                 COUNT(DISTINCT RI.TenantId) AS TotalTenants,
-            
-                ISNULL(SUM(RI.TotalRent), 0) AS TotalRentDue,
-            
-                ISNULL(SUM(P.PaymentAmount), 0) AS CollectedAmount,
-            
-                ISNULL(SUM(RI.TotalRent) - SUM(ISNULL(P.PaymentAmount,0)), 0) AS PendingAmount
-            
+
+                ISNULL(SUM(RI.TotalRent + RI.LateFeeCharged), 0) AS TotalRentDue,
+
+                ISNULL(SUM(BAL.Paid), 0) AS CollectedAmount,
+
+                ISNULL(SUM(CASE WHEN BAL.Balance > 0 THEN BAL.Balance ELSE 0 END), 0) AS PendingAmount
+
             FROM Months M
-            
-            LEFT JOIN RentInvoices RI 
+
+            LEFT JOIN RentInvoices RI
                 ON YEAR(RI.InvoiceDate) = YEAR(M.MonthStart)
                 AND MONTH(RI.InvoiceDate) = MONTH(M.MonthStart)
-            
-            LEFT JOIN Payments P 
-                ON P.RentInvoiceId = RI.Id
-            
+                AND RI.StatusId <> 6
+
+            OUTER APPLY dbo.InvoiceBalance(RI.Id, 0) BAL
+
             GROUP BY M.MonthStart
             ORDER BY M.MonthStart;
             ";

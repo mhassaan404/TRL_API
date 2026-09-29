@@ -7,13 +7,14 @@ using TRL_API.Models;
 
 namespace TRL_API.Controllers
 {
+    [Authorize(Roles = "Admin,Tenant")]
     [Route("api/[controller]")]
     [ApiController]
     public class RentHistoryController : ControllerBase
     {
-        private readonly RentHistoryService _service;
+        private readonly IRentHistoryService _service;
 
-        public RentHistoryController(RentHistoryService service)
+        public RentHistoryController(IRentHistoryService service)
         {
             _service = service;
         }
@@ -27,18 +28,20 @@ namespace TRL_API.Controllers
             return Ok(list);
         }
 
+        [Authorize(Roles = "Admin")]
         [HttpPatch("CancelInvoice")]
         public async Task<IActionResult> CancelInvoice([FromBody] int id, [FromQuery] string? reason)
         {
-            if (id <= 0) return Ok(new ApiResponse { IsSuccess = false, ErrorMessage = "Invoice Id not found." });
-            return Ok(await _service.CancelInvoice(id, reason, 1)); // TODO: real user id when security is added
+            if (id <= 0) return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "Invoice is required." });
+            return Ok(await _service.CancelInvoice(id, reason, User.GetUserId()));
         }
 
+        [Authorize(Roles = "Admin")]
         [HttpPatch("ReinstateInvoice")]
         public async Task<IActionResult> ReinstateInvoice([FromBody] int id)
         {
             if (id <= 0)
-                return Ok("Invoice Id not found.");
+                return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "Invoice is required." });
 
             var response = await _service.ReinstateInvoice(id);
             return Ok(response);

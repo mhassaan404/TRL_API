@@ -21,5 +21,6 @@
     {
         public int LeaseId { get; set; }
         public string Reason { get; set; } = "";
+        public DateTime? MoveOutDate { get; set; } // last day the tenant occupies the unit; default today
     }
 }

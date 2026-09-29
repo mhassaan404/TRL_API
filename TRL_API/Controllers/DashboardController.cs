@@ -24,7 +24,7 @@ namespace TRL_API.Controllers
         public async Task<IActionResult> GetDashboardData()
         {
             var data = await _service.GetDashboardData();
-            var list = DataTableHelper.ToDictionaryList(data);
+            var list = DataTableHelper.ToDictionaryList(data, true);
             return Ok(list);
         }
     }

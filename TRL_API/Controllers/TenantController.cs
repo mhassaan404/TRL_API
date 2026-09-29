@@ -21,7 +21,7 @@ namespace TRL_API.Controllers
         public async Task<IActionResult> GetTenants()
         {
             var data = await _service.GetTenants();
-            var list = DataTableHelper.ToDictionaryList(data);
+            var list = DataTableHelper.ToDictionaryList(data, true);
             return Ok(list);
         }
 

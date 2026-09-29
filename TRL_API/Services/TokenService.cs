@@ -18,7 +18,7 @@ namespace TRL_API.Services
         public string GenerateAccessToken(User user)
         {
             var tokenHandler = new JwtSecurityTokenHandler();
-            var key = Encoding.ASCII.GetBytes(_jwtSettings.SecretKey);
+            var key = Encoding.UTF8.GetBytes(_jwtSettings.SecretKey);
 
             var claims = new[]
             {

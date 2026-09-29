@@ -24,7 +24,7 @@ namespace TRL_API.Controllers
         public async Task<IActionResult> GetTenants()
         {
             var data = await _service.GetTenantsAsync();
-            var list = DataTableHelper.ToDictionaryList(data);
+            var list = DataTableHelper.ToDictionaryList(data, true);
             return Ok(list);
         }
 
@@ -36,7 +36,7 @@ namespace TRL_API.Controllers
                 return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "Tenant is required." });
 
             var data = await _service.GetInvoicesByTenantAsync(tenantId);
-            var list = DataTableHelper.ToDictionaryList(data);
+            var list = DataTableHelper.ToDictionaryList(data, true);
             return Ok(list);
         }
 
@@ -168,7 +168,7 @@ namespace TRL_API.Controllers
                 return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "Invoice is required." });
 
             var data = await _service.GetPaymentHistoryAsync(invoiceId);
-            var list = DataTableHelper.ToDictionaryList(data);
+            var list = DataTableHelper.ToDictionaryList(data, true);
             return Ok(list);
         }
 

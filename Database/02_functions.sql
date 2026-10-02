@@ -5,40 +5,31 @@ SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE FUNCTION [dbo].[CalculateLateFee]
+
+CREATE   FUNCTION dbo.CalculateLateFee
 (
     @RemainingAmount DECIMAL(18,2),
     @MonthlyRent DECIMAL(18,2),
     @DueDate DATE,
-    @CurrentDate DATE
+    @CurrentDate DATE,
+    @LateFeePerDay DECIMAL(18,2),
+    @MaxMultiplier DECIMAL(5,2)
 )
 RETURNS DECIMAL(18,2)
 AS
 BEGIN
     DECLARE @DaysOverdue INT = DATEDIFF(DAY, @DueDate, @CurrentDate);
-    
-    -- If not overdue or negative days → return 0
+
+    -- Not overdue yet (on or before the due date): no late fee
     IF @DaysOverdue <= 0
         RETURN 0;
-    
-    -- Example logic - adjust to your exact business rules
-    -- Option 1: Flat fee per day (common in Pakistan rentals)
-    DECLARE @DailyLateFee DECIMAL(18,2) = 500.00;  -- e.g., 500 PKR per day
-    
-    -- Option 2: Percentage of remaining rent per day
-    -- DECLARE @DailyLateFee DECIMAL(18,2) = @RemainingAmount * 0.02;  -- 2% per day
-    
-    -- Option 3: Percentage of monthly rent per month overdue
-    -- DECLARE @MonthlyPenalty DECIMAL(18,2) = @MonthlyRent * 0.10;  -- 10% of monthly rent
-    -- DECLARE @LateFee DECIMAL(18,2) = @MonthlyPenalty * (@DaysOverdue / 30.0);
-    
-    -- Simple flat daily example (change as per your rules)
-    DECLARE @LateFee DECIMAL(18,2) = @DailyLateFee * @DaysOverdue;
-    
-    -- Optional: Cap the maximum late fee
-    IF @LateFee > (@MonthlyRent * 2)  -- e.g., max 2 months rent
-        SET @LateFee = @MonthlyRent * 2;
-    
+
+    -- A flat fee for each day overdue, capped at a multiple of the invoice's rent
+    DECLARE @LateFee DECIMAL(18,2) = @LateFeePerDay * @DaysOverdue;
+
+    IF @LateFee > (@MonthlyRent * @MaxMultiplier)
+        SET @LateFee = @MonthlyRent * @MaxMultiplier;
+
     RETURN ISNULL(@LateFee, 0);
 END
 GO
@@ -58,7 +49,8 @@ RETURN
            CAST(CASE WHEN ri.LateFeeCharged = 0 AND p.Waived = 0
                           AND ri.DueDate < CAST(GETUTCDATE() AS DATE)
                           AND ri.TotalRent - p.Paid - p.Disc > 0
-                     THEN dbo.CalculateLateFee(ri.TotalRent - p.Paid - p.Disc, ri.TotalRent, ri.DueDate, GETUTCDATE())
+                     THEN dbo.CalculateLateFee(ri.TotalRent - p.Paid - p.Disc, ri.TotalRent, ri.DueDate, GETUTCDATE(),
+                                               ri.LateFeePerDay, ri.LateFeeMaxMultiplier)
                      ELSE 0 END AS DECIMAL(18, 2)) AS OpenLateFee
     FROM dbo.RentInvoices ri
     OUTER APPLY (SELECT ISNULL(SUM(PaymentAmount), 0) AS Paid,

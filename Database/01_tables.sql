@@ -120,6 +120,40 @@ SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
+CREATE TABLE [dbo].[LateFeeSettings](
+	[Id] [int] NOT NULL,
+	[PaymentDueDays] [int] NOT NULL,
+	[LateFeePerDay] [decimal](18, 2) NOT NULL,
+	[MaxLateFeeMultiplier] [decimal](5, 2) NOT NULL,
+	[UpdatedBy] [int] NULL,
+	[UpdatedAt] [datetime] NULL,
+ CONSTRAINT [PK_LateFeeSettings] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+ALTER TABLE [dbo].[LateFeeSettings]  WITH CHECK ADD  CONSTRAINT [CK_LateFeeSettings_LateFeePerDay] CHECK  (([LateFeePerDay]>(0) AND [LateFeePerDay]<=(100000)))
+GO
+ALTER TABLE [dbo].[LateFeeSettings] CHECK CONSTRAINT [CK_LateFeeSettings_LateFeePerDay]
+GO
+ALTER TABLE [dbo].[LateFeeSettings]  WITH CHECK ADD  CONSTRAINT [CK_LateFeeSettings_MaxLateFeeMultiplier] CHECK  (([MaxLateFeeMultiplier]>(0) AND [MaxLateFeeMultiplier]<=(12)))
+GO
+ALTER TABLE [dbo].[LateFeeSettings] CHECK CONSTRAINT [CK_LateFeeSettings_MaxLateFeeMultiplier]
+GO
+ALTER TABLE [dbo].[LateFeeSettings]  WITH CHECK ADD  CONSTRAINT [CK_LateFeeSettings_PaymentDueDays] CHECK  (([PaymentDueDays]>=(0) AND [PaymentDueDays]<=(90)))
+GO
+ALTER TABLE [dbo].[LateFeeSettings] CHECK CONSTRAINT [CK_LateFeeSettings_PaymentDueDays]
+GO
+ALTER TABLE [dbo].[LateFeeSettings]  WITH CHECK ADD  CONSTRAINT [CK_LateFeeSettings_SingleRow] CHECK  (([Id]=(1)))
+GO
+ALTER TABLE [dbo].[LateFeeSettings] CHECK CONSTRAINT [CK_LateFeeSettings_SingleRow]
+GO
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
 CREATE TABLE [dbo].[MaintenanceRequests](
 	[Id] [int] IDENTITY(1,1) NOT NULL,
 	[TenantId] [int] NOT NULL,
@@ -230,6 +264,8 @@ CREATE TABLE [dbo].[RentInvoices](
 	[LeaseId] [int] NULL,
 	[UnitId] [int] NULL,
 	[InvoiceMonth]  AS (datefromparts(datepart(year,[InvoiceDate]),datepart(month,[InvoiceDate]),(1))) PERSISTED,
+	[LateFeePerDay] [decimal](18, 2) NOT NULL,
+	[LateFeeMaxMultiplier] [decimal](5, 2) NOT NULL,
 PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC

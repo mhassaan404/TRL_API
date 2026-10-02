@@ -36,3 +36,8 @@ SELECT v.Id, v.Name, 1 FROM (VALUES (1, N'Available'), (2, N'Rented'), (3, N'Res
 WHERE NOT EXISTS (SELECT 1 FROM [dbo].[UnitStatus] t WHERE t.Id = v.Id);
 SET IDENTITY_INSERT [dbo].[UnitStatus] OFF;
 GO
+
+-- Late fee settings (one row; edited on the Late Fee Settings page): 5 due days, 500 per day, max 2 x invoice rent
+INSERT INTO [dbo].[LateFeeSettings] ([Id], [PaymentDueDays], [LateFeePerDay], [MaxLateFeeMultiplier])
+SELECT 1, 5, 500, 2 WHERE NOT EXISTS (SELECT 1 FROM [dbo].[LateFeeSettings] WHERE [Id] = 1);
+GO

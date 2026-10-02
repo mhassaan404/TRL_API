@@ -8,10 +8,12 @@ namespace TRL_API.BLL
     public class RentService : IRentService
     {
         private readonly IRentRepository _dal;
+        private readonly ILateFeeSettingsRepository _lateFeeSettings;
 
-        public RentService(IRentRepository dal)
+        public RentService(IRentRepository dal, ILateFeeSettingsRepository lateFeeSettings)
         {
             _dal = dal;
+            _lateFeeSettings = lateFeeSettings;
         }
 
         public async Task<DataTable> GetTenantsAsync() => await _dal.GetTenantsAsync();
@@ -225,7 +227,8 @@ namespace TRL_API.BLL
         // Bills rent from the leases covering the month: one invoice per lease, prorated for partial months.
         // tenantIds: null or empty = all tenants. Otherwise only those tenants' leases.
         // Leases already billed this month are skipped, so re-running is always safe.
-        public async Task<ApiResponse> GenerateInvoicesAsync(int month, int year, int dueInDays, List<int>? tenantIds)
+        // dueInDays: null = the Payment Due Days setting (an explicit value is still accepted, as before)
+        public async Task<ApiResponse> GenerateInvoicesAsync(int month, int year, int? dueInDays, List<int>? tenantIds)
         {
             if (month < 1 || month > 12 || year < 2000 || year > 2100)
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "Select a valid month and year." };
@@ -242,6 +245,10 @@ namespace TRL_API.BLL
                 };
             if (dueInDays < 0 || dueInDays > 90)
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "Due days must be between 0 and 90." };
+
+            // Read once, so every invoice of this run gets the same due days and late-fee rule
+            var settings = await _lateFeeSettings.GetAsync();
+            int dueDays = dueInDays ?? settings.PaymentDueDays;
 
             var monthStart = new DateTime(year, month, 1);
             bool allTenants = tenantIds == null || tenantIds.Count == 0;
@@ -296,12 +303,13 @@ namespace TRL_API.BLL
                 // The invoice starts on the first covered day (the 1st, or the move-in day), so the due date
                 // is never before move-in and no late fee can apply before the tenant has moved in.
                 var invoiceDate = Convert.ToDateTime(row["FromDate"]);
-                var dueDate = invoiceDate.AddDays(dueInDays);
+                var dueDate = invoiceDate.AddDays(dueDays);
                 string? description = row["Descr"] == DBNull.Value ? null : row["Descr"].ToString();
 
                 try
                 {
-                    var result = await _dal.CreateInvoice(tenantId, amount, invoiceDate, dueDate, description, leaseId: leaseId, unitId: unitId);
+                    var result = await _dal.CreateInvoice(tenantId, amount, invoiceDate, dueDate,
+                        settings.LateFeePerDay, settings.MaxLateFeeMultiplier, description, leaseId: leaseId, unitId: unitId);
                     if (result.IsSuccess) created++;
                 }
                 catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number is 2601 or 2627)
@@ -325,7 +333,7 @@ namespace TRL_API.BLL
         // (Maintenance, Late Fine, Security Deposit, etc.) — separate from their
         // regular monthly rent invoice, clearly labeled via Description/ChargeType.
         public async Task<ApiResponse> CreateExtraChargeAsync(
-            List<int> tenantIds, int month, int year, string chargeType, string description, decimal amount, int dueInDays)
+            List<int> tenantIds, int month, int year, string chargeType, string description, decimal amount, int? dueInDays)
         {
             if (tenantIds == null || tenantIds.Count == 0)
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "Select at least one tenant." };
@@ -339,13 +347,16 @@ namespace TRL_API.BLL
             if (string.IsNullOrWhiteSpace(chargeType))
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "Charge type is required." };
 
+            // null = the Payment Due Days setting; the charge also keeps the current late-fee rule
+            var settings = await _lateFeeSettings.GetAsync();
             var invoiceDate = new DateTime(year, month, 1);
-            var dueDate = invoiceDate.AddDays(dueInDays);
+            var dueDate = invoiceDate.AddDays(dueInDays ?? settings.PaymentDueDays);
             int created = 0;
 
             foreach (var tenantId in tenantIds)
             {
-                var result = await _dal.CreateInvoice(tenantId, amount, invoiceDate, dueDate, description, chargeType);
+                var result = await _dal.CreateInvoice(tenantId, amount, invoiceDate, dueDate,
+                    settings.LateFeePerDay, settings.MaxLateFeeMultiplier, description, chargeType);
                 if (result.IsSuccess) created++;
             }
 

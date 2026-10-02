@@ -573,19 +573,23 @@ namespace TRL_API.DAL
         // leaseId/unitId are set for monthly rent (billed from a lease); extra charges leave them null and
         // the unit defaults to the tenant's current unit so the invoice still shows where it belongs.
         public async Task<ApiResponse> CreateInvoice(
-            int tenantId, decimal totalRent, DateTime invoiceDate, DateTime dueDate,
+            int tenantId, decimal totalRent, DateTime invoiceDate, DateTime dueDate, decimal lateFeePerDay, decimal lateFeeMaxMultiplier,
             string? description = null, string? chargeType = null, int? leaseId = null, int? unitId = null)
         {
             // StatusId 2 = Unpaid. NOT 3 (Pending): GetRentCollectionAsync only
             // shows StatusId IN (2,8,9), so a Pending invoice would never surface
             // in the collections list until something else changed its status —
             // and since there's no scheduled job, it would sit invisible forever.
+            // LateFeePerDay / LateFeeMaxMultiplier: the late-fee rule in force when the invoice is created, kept with
+            // the invoice so later settings changes don't re-price it.
             string query = @"
                 INSERT INTO RentInvoices
-                    (TenantId, LeaseId, UnitId, TotalRent, PendingAmount, OverPaidAmount, InvoiceDate, DueDate, StatusId, Description, ChargeType, CreatedAt)
+                    (TenantId, LeaseId, UnitId, TotalRent, PendingAmount, OverPaidAmount, InvoiceDate, DueDate, StatusId, Description, ChargeType, CreatedAt,
+                     LateFeePerDay, LateFeeMaxMultiplier)
                 VALUES
                     (@TenantId, @LeaseId, ISNULL(@UnitId, (SELECT UnitId FROM Tenants WHERE TenantId = @TenantId)),
-                     @TotalRent, @TotalRent, 0, @InvoiceDate, @DueDate, 2, @Description, @ChargeType, GETDATE());";
+                     @TotalRent, @TotalRent, 0, @InvoiceDate, @DueDate, 2, @Description, @ChargeType, GETDATE(),
+                     @LateFeePerDay, @LateFeeMaxMultiplier);";
 
             var parameters = new[]
             {
@@ -597,6 +601,8 @@ namespace TRL_API.DAL
                 new SqlParameter("@ChargeType", (object?)chargeType ?? DBNull.Value),
                 new SqlParameter("@LeaseId", (object?)leaseId ?? DBNull.Value),
                 new SqlParameter("@UnitId", (object?)unitId ?? DBNull.Value),
+                new SqlParameter("@LateFeePerDay", SqlDbType.Decimal) { Precision = 18, Scale = 2, Value = lateFeePerDay },
+                new SqlParameter("@LateFeeMaxMultiplier", SqlDbType.Decimal) { Precision = 5, Scale = 2, Value = lateFeeMaxMultiplier },
             };
 
             return await _dbHelper.ExecuteQueryAsync(query, parameters);

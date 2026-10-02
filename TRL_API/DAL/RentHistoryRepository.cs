@@ -39,6 +39,55 @@ namespace TRL_API.DAL
             return await _dbHelper.ExecuteQueryReturnDataTableAsync(query);
         }
 
+        // Everything about one invoice for the History window (read only): the invoice and its totals, each payment
+        // record with the balance after it, and the recorded events (cancel, reinstate, rent adjusted on lease
+        // end/renewal, discount reduced, late fee reversed). Returns (invoice, payments, events); invoice is empty
+        // when the id doesn't exist.
+        public async Task<(DataTable Invoice, DataTable Payments, DataTable Events)> GetInvoiceDetailsAsync(int invoiceId)
+        {
+            var id = new SqlParameter("@InvoiceId", invoiceId);
+
+            var invoice = await _dbHelper.ExecuteQueryReturnDataTableAsync(@"
+                SELECT ri.Id AS InvoiceId, ri.TenantId, t.Name AS TenantName, b.BuildingName, f.FloorNumber, u.UnitNumber,
+                       ri.LeaseId, ri.InvoiceDate, ri.DueDate, ri.InvoiceMonth, ri.CreatedAt,
+                       ri.TotalRent, ri.Description, ri.ChargeType, COALESCE(sl.StatusName, 'Unknown') AS Status,
+                       ri.LateFeeCharged, ri.LateFeeChargedAt, ri.LateFeePerDay, ri.LateFeeMaxMultiplier,
+                       bal.Paid, bal.Disc AS Discount, bal.Waived AS LateFeeWaived, bal.OpenLateFee,
+                       bal.RentBalance, bal.Balance
+                FROM RentInvoices ri
+                INNER JOIN Tenants t ON t.TenantId = ri.TenantId
+                LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
+                LEFT JOIN Floors f ON f.FloorId = u.FloorId
+                LEFT JOIN Buildings b ON b.BuildingId = f.BuildingId
+                LEFT JOIN StatusList sl ON sl.StatusId = ri.StatusId
+                CROSS APPLY dbo.InvoiceBalance(ri.Id, 0) bal
+                WHERE ri.Id = @InvoiceId;", new[] { id });
+
+            // Balance after each record = rent + charged late fee - everything paid/discounted up to that record
+            var payments = await _dbHelper.ExecuteQueryReturnDataTableAsync(@"
+                SELECT p.Id AS PaymentId, p.PaymentDate, p.PaymentAmount, p.DiscountAmount, p.DiscountPercent,
+                       p.IsLateFeeWaived, p.PaymentMethod, p.Notes, p.CreatedAt, cu.Username AS CreatedBy,
+                       p.UpdatedAt, uu.Username AS UpdatedBy,
+                       ri.TotalRent + ri.LateFeeCharged
+                         - SUM(p.PaymentAmount + p.DiscountAmount) OVER (ORDER BY p.PaymentDate, p.Id
+                                                                         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS BalanceAfter
+                FROM Payments p
+                INNER JOIN RentInvoices ri ON ri.Id = p.RentInvoiceId
+                LEFT JOIN Users cu ON cu.UserId = p.CreatedBy
+                LEFT JOIN Users uu ON uu.UserId = p.UpdatedBy
+                WHERE p.RentInvoiceId = @InvoiceId
+                ORDER BY p.PaymentDate, p.Id;", new[] { new SqlParameter("@InvoiceId", invoiceId) });
+
+            var events = await _dbHelper.ExecuteQueryReturnDataTableAsync(@"
+                SELECT a.Id AS EventId, a.CreatedAt, a.Action, a.Amount, a.Reason, u.Username AS CreatedBy
+                FROM InvoiceAudit a
+                LEFT JOIN Users u ON u.UserId = a.CreatedBy
+                WHERE a.InvoiceId = @InvoiceId
+                ORDER BY a.CreatedAt, a.Id;", new[] { new SqlParameter("@InvoiceId", invoiceId) });
+
+            return (invoice, payments, events);
+        }
+
         // Only allowed when the invoice has no payment records at all.
         public async Task<DataTable> CancelInvoice(int invoiceId, string reason, int userId)
         {

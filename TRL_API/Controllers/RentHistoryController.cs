@@ -28,6 +28,25 @@ namespace TRL_API.Controllers
             return Ok(list);
         }
 
+        // One invoice with its payments and recorded events (History window on Rent History). Read only.
+        [HttpGet("InvoiceDetails")]
+        public async Task<IActionResult> GetInvoiceDetails([FromQuery] int invoiceId)
+        {
+            if (invoiceId <= 0)
+                return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "Invoice is required." });
+
+            var (invoice, payments, events) = await _service.GetInvoiceDetailsAsync(invoiceId);
+            if (invoice.Rows.Count == 0)
+                return NotFound(new ApiResponse { IsSuccess = false, ErrorMessage = "Invoice not found." });
+
+            return Ok(new
+            {
+                invoice = DataTableHelper.ToDictionaryList(invoice, true)[0],
+                payments = DataTableHelper.ToDictionaryList(payments, true),
+                events = DataTableHelper.ToDictionaryList(events, true),
+            });
+        }
+
         [Authorize(Roles = "Admin")]
         [HttpPatch("CancelInvoice")]
         public async Task<IActionResult> CancelInvoice([FromBody] int id, [FromQuery] string? reason)

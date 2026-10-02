@@ -250,7 +250,7 @@ namespace TRL_API.Controllers
         public List<int>? TenantIds { get; set; } // null/empty = all active tenants
         public int Month { get; set; }
         public int Year { get; set; }
-        public int DueInDays { get; set; } = 5;
+        public int? DueInDays { get; set; } // null = the Payment Due Days setting
     }
 
     public class ExtraChargeRequest
@@ -261,6 +261,6 @@ namespace TRL_API.Controllers
         public string ChargeType { get; set; } = "";
         public string Description { get; set; } = "";
         public decimal Amount { get; set; }
-        public int DueInDays { get; set; } = 5;
+        public int? DueInDays { get; set; } // null = the Payment Due Days setting
     }
 }

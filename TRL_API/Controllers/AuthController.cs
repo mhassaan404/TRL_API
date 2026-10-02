@@ -52,7 +52,6 @@ namespace TRL_API.Controllers
                 _throttle.RecordFailure(request.Username, ClientIp);
                 return Unauthorized(new ApiResponse { IsSuccess = false, ErrorMessage = "Invalid username or password" });
             }
-
             _throttle.Reset(request.Username, ClientIp);
 
             // Checked only after the password is verified, so it doesn't reveal which accounts exist

@@ -29,4 +29,10 @@
     {
         public int LeaseId { get; set; } // the upcoming (renewal) lease
     }
+
+    // Undo a lease created by mistake: it is cancelled and never billed
+    public class CancelLeaseRequest
+    {
+        public int LeaseId { get; set; }
+    }
 }

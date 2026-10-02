@@ -67,10 +67,14 @@ namespace TRL_API.BLL
             if (moveOut > DateTime.Today)
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "Move-out date can't be in the future. End the lease on the day the tenant leaves." };
 
-            var result = await _dal.TerminateAsync(req, moveOut, userId);
-            return result.IsSuccess
-                ? new ApiResponse { IsSuccess = true, Message = $"Lease ended. Rent is billed through {moveOut:dd MMM yyyy}." }
-                : new ApiResponse { IsSuccess = false, ErrorMessage = "Active lease not found." };
+            return await _dal.TerminateAsync(req, moveOut, userId);
+        }
+
+        public async Task<ApiResponse> CancelLeaseAsync(CancelLeaseRequest req, int userId)
+        {
+            if (req.LeaseId <= 0)
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "Lease is required." };
+            return await _dal.CancelLeaseAsync(req.LeaseId, userId);
         }
     }
 }

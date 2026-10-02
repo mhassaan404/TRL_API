@@ -326,14 +326,20 @@ namespace TRL_API.DAL
         {
             string query = @"
                 SET XACT_ABORT ON;
-                DECLARE @TenantId INT, @UnitId INT, @AdjReason NVARCHAR(300) = CONCAT(N'Lease ended: ', @Reason);
+                DECLARE @TenantId INT, @UnitId INT, @Start DATE, @Today DATE = CAST(GETDATE() AS DATE),
+                        @AdjReason NVARCHAR(300) = CONCAT(N'Lease ended: ', @Reason);
 
                 -- Lock the lease row: a second simultaneous terminate waits here, then finds the lease already ended
-                -- and changes nothing (0 rows = failure), so leases can't end up with different end dates.
+                -- and changes nothing, so leases can't end up with different end dates.
                 BEGIN TRAN;
-                SELECT @TenantId = TenantId, @UnitId = UnitId
+                SELECT @TenantId = TenantId, @UnitId = UnitId, @Start = StartDate
                 FROM TenantLeases WITH (UPDLOCK, HOLDLOCK) WHERE LeaseId = @LeaseId AND IsActive = 1;
-                IF @TenantId IS NULL BEGIN ROLLBACK; RETURN; END
+                IF @TenantId IS NULL BEGIN ROLLBACK; SELECT 'NOT_FOUND' AS Result, @Start AS StartDate; RETURN; END
+
+                -- A lease that has started can't be ended before its start date (to undo a lease made by mistake,
+                -- use Cancel Lease). A lease that hasn't started yet is ended before its start, so nothing is billed.
+                IF @Start <= @Today AND @MoveOut < @Start
+                BEGIN ROLLBACK; SELECT 'BEFORE_START' AS Result, @Start AS StartDate; RETURN; END
 
                 UPDATE TenantLeases
                 SET IsActive = 0, TerminatedAt = GETDATE(), TerminationReason = @Reason,
@@ -360,7 +366,11 @@ namespace TRL_API.DAL
                     JOIN Units u ON u.UnitId = a.UnitId
                     WHERE t.TenantId = @TenantId AND t.UnitId = @UnitId;
                 " + AdjustInvoicesAfterEndSql + @"
-                COMMIT;";
+                COMMIT;
+
+                -- NO_RENT: ended before it started and no earlier term was cut either, so no rent is billed at all
+                SELECT CASE WHEN @MoveOut < @Start AND NOT EXISTS (SELECT 1 FROM @Affected WHERE LeaseId <> @LeaseId)
+                            THEN 'NO_RENT' ELSE 'OK' END AS Result, @Start AS StartDate;";
             var parameters = new[]
             {
                 new SqlParameter("@LeaseId", req.LeaseId),
@@ -368,7 +378,87 @@ namespace TRL_API.DAL
                 new SqlParameter("@MoveOut", SqlDbType.Date) { Value = moveOutDate.Date },
                 new SqlParameter("@UserId", userId),
             };
-            return await _dbHelper.ExecuteQueryAsync(query, parameters);
+            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters);
+            var result = dt.Rows.Count > 0 ? dt.Rows[0]["Result"].ToString() : null;
+            return result switch
+            {
+                "OK" => new ApiResponse { IsSuccess = true, Message = $"Lease ended. Rent is billed through {moveOutDate:dd MMM yyyy}." },
+                "NO_RENT" => new ApiResponse
+                {
+                    IsSuccess = true,
+                    Message = $"Lease ended before its start date ({Convert.ToDateTime(dt.Rows[0]["StartDate"]):dd MMM yyyy}). No rent is billed.",
+                },
+                "BEFORE_START" => new ApiResponse
+                {
+                    IsSuccess = false,
+                    ErrorMessage = $"The move-out date can't be before the lease start date ({Convert.ToDateTime(dt.Rows[0]["StartDate"]):dd MMM yyyy}).",
+                },
+                _ => new ApiResponse { IsSuccess = false, ErrorMessage = "Active lease not found." },
+            };
+        }
+
+        // Cancels a lease made by mistake: it is marked 'Lease cancelled' and billed through the day before it
+        // starts, so it is never billed, its rent invoices are cancelled and the unit is free again.
+        // Refused when payments, discounts or waivers are recorded on its rent invoices (reverse those first), and for
+        // a renewal (the tenant already lives there under the earlier term: use Cancel Renewal or End).
+        public async Task<ApiResponse> CancelLeaseAsync(int leaseId, int userId)
+        {
+            string query = @"
+                SET XACT_ABORT ON;
+                DECLARE @TenantId INT, @UnitId INT, @Start DATE, @AdjReason NVARCHAR(300) = N'Lease cancelled';
+
+                -- Lock the lease row like Renew/Terminate do: a second simultaneous cancel finds it no longer active
+                BEGIN TRAN;
+                SELECT @TenantId = TenantId, @UnitId = UnitId, @Start = StartDate
+                FROM TenantLeases WITH (UPDLOCK, HOLDLOCK) WHERE LeaseId = @LeaseId AND IsActive = 1;
+                IF @TenantId IS NULL BEGIN ROLLBACK; SELECT 'NOT_FOUND' AS Result; RETURN; END
+
+                IF EXISTS (SELECT 1 FROM TenantLeases
+                           WHERE TenantId = @TenantId AND UnitId = @UnitId AND LeaseId <> @LeaseId
+                             AND TerminationReason = 'Renewed' AND BilledThrough = DATEADD(DAY, -1, @Start))
+                BEGIN ROLLBACK; SELECT 'RENEWAL' AS Result; RETURN; END
+
+                IF EXISTS (SELECT 1 FROM RentInvoices ri JOIN Payments p ON p.RentInvoiceId = ri.Id
+                           WHERE ri.LeaseId = @LeaseId AND ri.ChargeType IS NULL)
+                BEGIN ROLLBACK; SELECT 'HAS_PAYMENTS' AS Result; RETURN; END
+
+                UPDATE TenantLeases
+                SET IsActive = 0, TerminatedAt = GETDATE(), TerminationReason = 'Lease cancelled',
+                    BilledThrough = DATEADD(DAY, -1, StartDate)
+                WHERE LeaseId = @LeaseId;
+
+                -- Same tenant update as End: inactive when no other active lease remains, otherwise point at that lease
+                IF NOT EXISTS (SELECT 1 FROM TenantLeases WHERE TenantId = @TenantId AND IsActive = 1)
+                    UPDATE Tenants SET IsActive = 0, MoveOutDate = CAST(GETDATE() AS DATE) WHERE TenantId = @TenantId;
+                ELSE
+                    UPDATE t SET UnitId = u.UnitId, FloorId = u.FloorId, BuildingId = u.BuildingId, MonthlyRent = a.RentAmount
+                    FROM Tenants t
+                    CROSS APPLY (SELECT TOP 1 UnitId, RentAmount FROM TenantLeases
+                                 WHERE TenantId = t.TenantId AND IsActive = 1 ORDER BY StartDate DESC) a
+                    JOIN Units u ON u.UnitId = a.UnitId
+                    WHERE t.TenantId = @TenantId AND t.UnitId = @UnitId;
+
+                -- Its rent invoices (none can have payments) are cancelled by the usual correction
+                DECLARE @Affected TABLE (LeaseId INT);
+                INSERT INTO @Affected VALUES (@LeaseId);
+                " + AdjustInvoicesAfterEndSql + @"
+                COMMIT;
+                SELECT 'OK' AS Result;";
+
+            var parameters = new[]
+            {
+                new SqlParameter("@LeaseId", leaseId),
+                new SqlParameter("@UserId", userId),
+            };
+            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters);
+            var result = dt.Rows.Count > 0 ? dt.Rows[0]["Result"].ToString() : null;
+            return result switch
+            {
+                "OK" => new ApiResponse { IsSuccess = true, Message = "Lease cancelled. No rent is billed for it and the unit is free again." },
+                "RENEWAL" => new ApiResponse { IsSuccess = false, ErrorMessage = "This lease is a renewal of an earlier term, so it can't be cancelled as a mistake. Use End to end the tenancy." },
+                "HAS_PAYMENTS" => new ApiResponse { IsSuccess = false, ErrorMessage = "Payments, discounts or waivers are recorded on this lease's invoices. Reverse them first." },
+                _ => new ApiResponse { IsSuccess = false, ErrorMessage = "Active lease not found." },
+            };
         }
     }
 }

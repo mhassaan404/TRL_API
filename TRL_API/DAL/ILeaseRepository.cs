@@ -13,5 +13,6 @@ namespace TRL_API.DAL
         Task<ApiResponse> RenewAsync(RenewLeaseRequest req, int userId);
         Task<ApiResponse> TerminateAsync(TerminateLeaseRequest req, DateTime moveOutDate, int userId);
         Task<ApiResponse> CancelRenewalAsync(int leaseId, int userId);
+        Task<ApiResponse> CancelLeaseAsync(int leaseId, int userId);
     }
 }

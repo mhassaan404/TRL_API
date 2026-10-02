@@ -47,6 +47,14 @@ namespace TRL_API.Controllers
         }
 
         [Authorize(Roles = "Admin")]
+        [HttpPost("Cancel")]
+        public async Task<IActionResult> Cancel(CancelLeaseRequest req)
+        {
+            var response = await _service.CancelLeaseAsync(req, User.GetUserId());
+            return response.IsSuccess ? Ok(response) : BadRequest(response);
+        }
+
+        [Authorize(Roles = "Admin")]
         [HttpPost("Terminate")]
         public async Task<IActionResult> Terminate(TerminateLeaseRequest req)
         {

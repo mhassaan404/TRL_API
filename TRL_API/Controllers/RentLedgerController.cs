@@ -3,13 +3,13 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace TRL_API.Controllers
 {
-    [Authorize]
+    [Authorize(Roles = "Admin")]
     [ApiController]
     [Route("api/[controller]")]
     public class RentLedgerController : Controller
     {
         [HttpGet("GetLedger")]
-        [Authorize(Roles = "Admin,Tenant")]
+        [Authorize(Roles = "Admin")]
         public IActionResult GetLedger()
         {
             // Only authorized users can access

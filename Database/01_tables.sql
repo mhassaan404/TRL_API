@@ -389,6 +389,10 @@ CREATE TABLE [dbo].[Tenants](
 	[Notes] [nvarchar](max) NULL,
 	[IsActive] [bit] NULL,
 	[IsDeleted] [bit] NOT NULL,
+	[TenantType] [nvarchar](20) NOT NULL,
+	[ContactPerson] [nvarchar](150) NULL,
+	[CnicNtn] [nvarchar](20) NULL,
+	[Address] [nvarchar](500) NULL,
  CONSTRAINT [PK__Tenants__3214EC077E9072C9] PRIMARY KEY CLUSTERED 
 (
 	[TenantId] ASC
@@ -405,6 +409,12 @@ GO
 ALTER TABLE [dbo].[Tenants] ADD  CONSTRAINT [DF__Tenants__Created__108B795B]  DEFAULT (getdate()) FOR [CreatedAt]
 GO
 ALTER TABLE [dbo].[Tenants] ADD  CONSTRAINT [DF_Tenants_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
+GO
+ALTER TABLE [dbo].[Tenants] ADD  CONSTRAINT [DF_Tenants_TenantType]  DEFAULT (N'Individual') FOR [TenantType]
+GO
+ALTER TABLE [dbo].[Tenants]  WITH CHECK ADD  CONSTRAINT [CK_Tenants_TenantType] CHECK  (([TenantType]=N'Individual' OR [TenantType]=N'Company'))
+GO
+ALTER TABLE [dbo].[Tenants] CHECK CONSTRAINT [CK_Tenants_TenantType]
 GO
 
 SET ANSI_NULLS ON

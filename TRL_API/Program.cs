@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using System.Text.Json;
+using System.Threading.RateLimiting;
 using TRL_API.BLL;
 using TRL_API.Data;
 using TRL_API.Helpers;
@@ -125,6 +126,23 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddScoped<DbHelper>();
 
+// Login protection: per-username lockout after repeated failures (LoginThrottle) plus a per-IP limit on /Auth/login.
+// Behind a reverse proxy, configure forwarded headers so RemoteIpAddress is the client, not the proxy.
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<LoginThrottle>();
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddPolicy("login", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    options.OnRejected = async (context, token) =>
+    {
+        const string message = "Too many login attempts from this address. Wait a minute and try again.";
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        await context.HttpContext.Response.WriteAsJsonAsync(new ApiResponse { IsSuccess = false, Message = message, ErrorMessage = message }, token);
+    };
+});
+
 var app = builder.Build();
 
 // Unhandled errors: log the details on the server, send the client a generic ApiResponse (never exception text).
@@ -146,13 +164,33 @@ app.UseExceptionHandler(errorApp =>
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI();
+    // Swagger calls need the same CSRF header as the frontend
+    app.UseSwaggerUI(options =>
+        options.UseRequestInterceptor("(req) => { req.headers['X-Requested-With'] = 'XMLHttpRequest'; return req; }"));
 }
 
 // Middleware order is important
 app.UseHttpsRedirection();
 
 app.UseCors("AllowFrontend");
+
+// CSRF protection: auth rides in cookies, so a state-changing request must carry X-Requested-With: XMLHttpRequest.
+// A cross-site form or link can't set that header, and a cross-site script can't either unless CORS allows its origin.
+app.Use(async (context, next) =>
+{
+    var method = context.Request.Method;
+    var changesState = !(HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsOptions(method));
+    if (changesState && context.Request.Headers["X-Requested-With"] != "XMLHttpRequest")
+    {
+        const string message = "Request blocked: missing X-Requested-With header.";
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await context.Response.WriteAsJsonAsync(new ApiResponse { IsSuccess = false, Message = message, ErrorMessage = message });
+        return;
+    }
+    await next();
+});
+
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();

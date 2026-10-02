@@ -7,7 +7,7 @@ using TRL_API.Models;
 
 namespace TRL_API.Controllers
 {
-    [Authorize(Roles = "Admin,Tenant")]
+    [Authorize(Roles = "Admin")]
     [Route("api/[controller]")]
     [ApiController]
     public class LeaseController : ControllerBase
@@ -35,6 +35,14 @@ namespace TRL_API.Controllers
         public async Task<IActionResult> Renew(RenewLeaseRequest req)
         {
             var response = await _service.RenewAsync(req, User.GetUserId());
+            return response.IsSuccess ? Ok(response) : BadRequest(response);
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("CancelRenewal")]
+        public async Task<IActionResult> CancelRenewal(CancelRenewalRequest req)
+        {
+            var response = await _service.CancelRenewalAsync(req, User.GetUserId());
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
 

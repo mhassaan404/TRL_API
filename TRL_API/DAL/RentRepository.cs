@@ -344,8 +344,20 @@ namespace TRL_API.DAL
         // excludePaymentId: when editing a payment, leave its current amounts out of the balance so they aren't counted twice.
         public async Task<string?> ValidatePaymentAsync(Payments p, SqlConnection conn, SqlTransaction tx, int excludePaymentId = 0)
         {
+            // The first statement locks the invoice row (UPDLOCK/HOLDLOCK) before anything reads it, so a second payment
+            // on the same invoice waits until this transaction commits and then validates against the updated balance.
+            // (Locking inside the main SELECT deadlocks: dbo.InvoiceBalance reads the row with a shared lock first.)
+            // RecentDuplicate catches a double-submitted new payment (same invoice and amounts within 10 seconds)
+            // that the balance check alone would let through.
             const string q = @"
-                SELECT ri.TenantId, ri.StatusId, b.Balance, b.RentBalance, b.OpenLateFee AS OpenFee
+                DECLARE @Locked INT;
+                SELECT @Locked = Id FROM RentInvoices WITH (UPDLOCK, HOLDLOCK) WHERE Id = @Id;
+                SELECT ri.TenantId, ri.StatusId, b.Balance, b.RentBalance, b.OpenLateFee AS OpenFee,
+                    CASE WHEN @ExcludeId = 0 AND EXISTS (
+                        SELECT 1 FROM Payments p
+                        WHERE p.RentInvoiceId = ri.Id AND p.PaymentAmount = @PaymentAmount
+                          AND p.DiscountAmount = @DiscountAmount AND p.IsLateFeeWaived = @IsLateFeeWaived
+                          AND p.CreatedAt >= DATEADD(SECOND, -10, GETDATE())) THEN 1 ELSE 0 END AS RecentDuplicate
                 FROM RentInvoices ri
                 CROSS APPLY dbo.InvoiceBalance(ri.Id, @ExcludeId) b
                 WHERE ri.Id = @Id;";
@@ -353,8 +365,13 @@ namespace TRL_API.DAL
             using var cmd = new SqlCommand(q, conn, tx);
             cmd.Parameters.AddWithValue("@Id", p.RentInvoiceId);
             cmd.Parameters.AddWithValue("@ExcludeId", excludePaymentId);
+            cmd.Parameters.Add(new SqlParameter("@PaymentAmount", SqlDbType.Decimal) { Precision = 18, Scale = 2, Value = p.PaymentAmount });
+            cmd.Parameters.Add(new SqlParameter("@DiscountAmount", SqlDbType.Decimal) { Precision = 18, Scale = 2, Value = p.DiscountAmount });
+            cmd.Parameters.AddWithValue("@IsLateFeeWaived", p.IsLateFeeWaived);
             using var r = await cmd.ExecuteReaderAsync();
             if (!await r.ReadAsync()) return "Invoice not found.";
+            if (Convert.ToInt32(r["RecentDuplicate"]) == 1)
+                return $"An identical payment for invoice #{p.RentInvoiceId} was just recorded. Refresh to see it before recording again.";
 
             if (Convert.ToInt32(r["TenantId"]) != p.TenantId) return "Invoice does not belong to this tenant.";
             if (Convert.ToInt32(r["StatusId"]) == 6) return "This invoice is cancelled.";
@@ -405,11 +422,19 @@ namespace TRL_API.DAL
         public async Task<DataTable> GetVacantUnitsAsync(int? includeUnitId)
         {
             var prm = new[] { new SqlParameter("@Include", SqlDbType.Int) { Value = (object?)includeUnitId ?? DBNull.Value } };
+            // Vacant = no active lease on the unit (leases are the source of truth, so every unit of a tenant with
+            // several leases is excluded, not just the one the Tenants row points at). Deleted units, floors and
+            // buildings are left out. The lease form builds its building and floor lists from these rows, so a
+            // floor only appears when it has at least one vacant unit.
             return await _dbHelper.ExecuteQueryReturnDataTableAsync(
-                @"SELECT BuildingId, BuildingName, FloorId, FloorNumber, UnitId, UnitNumber, UnitRent
-                    FROM vw_UnitOccupancy
-                    WHERE Occupancy = 'Vacant' OR UnitId = @Include
-                    ORDER BY BuildingName, FloorNumber, UnitNumber;", prm);
+                @"SELECT b.BuildingId, b.BuildingName, f.FloorId, f.FloorNumber, u.UnitId, u.UnitNumber, u.BaseRent AS UnitRent
+                    FROM Units u
+                    JOIN Floors f ON f.FloorId = u.FloorId
+                    JOIN Buildings b ON b.BuildingId = f.BuildingId
+                    WHERE u.IsActive = 1 AND f.IsActive = 1 AND b.IsActive = 1
+                      AND (NOT EXISTS (SELECT 1 FROM TenantLeases tl WHERE tl.UnitId = u.UnitId AND tl.IsActive = 1)
+                           OR u.UnitId = @Include)
+                    ORDER BY b.BuildingName, f.FloorNumber, u.UnitNumber;", prm);
         }
 
 
@@ -510,25 +535,35 @@ namespace TRL_API.DAL
             return await _dbHelper.ExecuteQueryReturnDataTableAsync(query);
         }
 
+        // Names of all non-deleted tenants (active or moved out), for messages that list tenants by name
+        public async Task<DataTable> GetTenantNamesAsync()
+        {
+            return await _dbHelper.ExecuteQueryReturnDataTableAsync(
+                "SELECT TenantId, Name FROM Tenants WHERE IsDeleted = 0;");
+        }
+
         public async Task<DataTable> GetLeaseChargesForMonth(int month, int year)
         {
             string query = @"
                 DECLARE @MonthStart DATE = DATEFROMPARTS(@Year, @Month, 1);
-                SELECT l.LeaseId, l.TenantId, l.UnitId, c.Amount, c.FromDate, c.Descr
+                -- Every lease that covers part of the month, flagged when that month's rent is already invoiced.
+                -- Cancelled invoices (StatusId 6) don't count, the same rule as the unique index
+                -- UX_RentInvoices_RentPerLeaseMonth: a cancelled month can be generated again.
+                SELECT l.LeaseId, l.TenantId, l.UnitId, c.Amount, c.FromDate, c.Descr,
+                    CAST(CASE WHEN EXISTS (
+                                SELECT 1 FROM RentInvoices ri
+                                WHERE ri.LeaseId = l.LeaseId AND ri.InvoiceMonth = @MonthStart
+                                  AND ri.ChargeType IS NULL AND ri.StatusId <> 6)
+                              -- invoices from before leases were linked to invoices (LeaseId NULL) for the same tenant+unit+month
+                              OR EXISTS (
+                                SELECT 1 FROM RentInvoices ri
+                                WHERE ri.LeaseId IS NULL AND ri.TenantId = l.TenantId AND ri.UnitId = l.UnitId
+                                  AND ri.InvoiceMonth = @MonthStart AND ri.ChargeType IS NULL AND ri.StatusId <> 6)
+                         THEN 1 ELSE 0 END AS BIT) AS AlreadyInvoiced
                 FROM TenantLeases l
                 JOIN Tenants t ON t.TenantId = l.TenantId
                 CROSS APPLY dbo.LeaseMonthCharge(l.LeaseId, @MonthStart) c
-                WHERE t.IsDeleted = 0 AND c.Days > 0 AND c.Amount > 0
-                  AND NOT EXISTS (
-                        SELECT 1 FROM RentInvoices ri
-                        WHERE ri.LeaseId = l.LeaseId AND ri.InvoiceMonth = @MonthStart AND ri.ChargeType IS NULL
-                  )
-                  -- invoices from before leases were linked to invoices (LeaseId NULL) for the same tenant+unit+month
-                  AND NOT EXISTS (
-                        SELECT 1 FROM RentInvoices ri
-                        WHERE ri.LeaseId IS NULL AND ri.TenantId = l.TenantId AND ri.UnitId = l.UnitId
-                          AND ri.InvoiceMonth = @MonthStart AND ri.ChargeType IS NULL AND ri.StatusId <> 6
-                  );";
+                WHERE t.IsDeleted = 0 AND c.Days > 0 AND c.Amount > 0;";
             var parameters = new[] { new SqlParameter("@Month", month), new SqlParameter("@Year", year) };
             return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters);
         }

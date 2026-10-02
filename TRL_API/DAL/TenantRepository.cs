@@ -32,13 +32,17 @@ namespace TRL_API.DAL
 
             string query = @"
                 INSERT INTO [dbo].[Tenants]
-                    (Name, BuildingId, FloorId, UnitId, Contact, Email, MonthlyRent, MoveOutDate, CityId, CreatedBy, CreatedAt, Notes, IsActive)
+                    (Name, TenantType, ContactPerson, CnicNtn, Address, BuildingId, FloorId, UnitId, Contact, Email, MonthlyRent, MoveOutDate, CityId, CreatedBy, CreatedAt, Notes, IsActive)
                 VALUES
-                    (@Name, @BuildingId, @FloorId, @UnitId, @Contact, @Email, @MonthlyRent, @MoveOutDate, @CityId, @CreatedBy, GETUTCDATE(), @Notes, @IsActive)";
+                    (@Name, @TenantType, @ContactPerson, @CnicNtn, @Address, @BuildingId, @FloorId, @UnitId, @Contact, @Email, @MonthlyRent, @MoveOutDate, @CityId, @CreatedBy, GETUTCDATE(), @Notes, @IsActive)";
 
             var parameters = new[]
             {
                 new SqlParameter("@Name", tenant.Name ?? (object)DBNull.Value),
+                new SqlParameter("@TenantType", tenant.TenantType ?? (object)DBNull.Value),
+                new SqlParameter("@ContactPerson", tenant.ContactPerson ?? (object)DBNull.Value),
+                new SqlParameter("@CnicNtn", tenant.CnicNtn ?? (object)DBNull.Value),
+                new SqlParameter("@Address", tenant.Address ?? (object)DBNull.Value),
                 new SqlParameter("@BuildingId", tenant.BuildingId == 0 ? (object)DBNull.Value : tenant.BuildingId),
                 new SqlParameter("@FloorId", tenant.FloorId == 0 ? (object)DBNull.Value : tenant.FloorId),
                 new SqlParameter("@UnitId", tenant.UnitId == 0 ? (object)DBNull.Value : tenant.UnitId),
@@ -61,13 +65,18 @@ namespace TRL_API.DAL
             UPDATE [dbo].[Tenants]
             SET
                 Name = @Name,
+                TenantType = @TenantType,
+                ContactPerson = @ContactPerson,
+                CnicNtn = @CnicNtn,
+                Address = @Address,
                 Contact = @Contact,
                 Email = @Email,
                 -- Set only when the tenant goes from active to inactive; kept on later edits; cleared on reactivation
                 MoveOutDate = CASE WHEN @IsActive = 1 THEN NULL
                                    WHEN ISNULL(IsActive, 0) = 1 OR MoveOutDate IS NULL THEN GETUTCDATE()
                                    ELSE MoveOutDate END,
-                CityId = @CityId,
+                -- The tenant form no longer has a city: keep the stored one unless a city is sent
+                CityId = COALESCE(@CityId, CityId),
                 UpdatedBy = @UpdatedBy,
                 UpdatedAt = GETUTCDATE(),
                 Notes=@Notes,
@@ -78,6 +87,10 @@ namespace TRL_API.DAL
             {
                 new SqlParameter("@TenantId", tenant.TenantId),
                 new SqlParameter("@Name", tenant.Name ?? (object)DBNull.Value),
+                new SqlParameter("@TenantType", tenant.TenantType ?? (object)DBNull.Value),
+                new SqlParameter("@ContactPerson", tenant.ContactPerson ?? (object)DBNull.Value),
+                new SqlParameter("@CnicNtn", tenant.CnicNtn ?? (object)DBNull.Value),
+                new SqlParameter("@Address", tenant.Address ?? (object)DBNull.Value),
                 new SqlParameter("@Contact", tenant.Contact ?? (object)DBNull.Value),
                 new SqlParameter("@Email", tenant.Email ?? (object)DBNull.Value),
                 new SqlParameter("@CityId", tenant.CityId == 0 ? (object)DBNull.Value : tenant.CityId),

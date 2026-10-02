@@ -48,8 +48,21 @@ namespace TRL_API.BLL
             return await _dal.RenewAsync(req, userId);
         }
 
+        public async Task<ApiResponse> CancelRenewalAsync(CancelRenewalRequest req, int userId)
+        {
+            if (req.LeaseId <= 0)
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "Lease is required." };
+            return await _dal.CancelRenewalAsync(req.LeaseId, userId);
+        }
+
         public async Task<ApiResponse> TerminateAsync(TerminateLeaseRequest req, int userId)
         {
+            if (string.IsNullOrWhiteSpace(req.Reason))
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "Please enter a reason for ending the lease." };
+            req.Reason = req.Reason.Trim();
+            if (req.Reason.Length > 200)
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "The reason can be at most 200 characters." };
+
             var moveOut = req.MoveOutDate?.Date ?? DateTime.Today;
             if (moveOut > DateTime.Today)
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "Move-out date can't be in the future. End the lease on the day the tenant leaves." };

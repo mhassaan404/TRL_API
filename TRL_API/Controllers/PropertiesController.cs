@@ -5,7 +5,7 @@ using TRL_API.Helpers;
 
 namespace TRL_API.Controllers
 {
-    [Authorize(Roles = "Admin,Tenant")]
+    [Authorize(Roles = "Admin")]
     [Route("api/[controller]")]
     [ApiController]
     public class PropertiesController : ControllerBase

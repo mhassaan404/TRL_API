@@ -28,13 +28,17 @@ namespace TRL_API.DAL
                 c.Name AS CityName,
                 us.Id AS StatusId,
                 us.Name AS Status,
-                u.Note
+                u.Note,
+                -- Occupied = the unit has an active lease (or an active tenant still points at it)
+                CAST(CASE WHEN EXISTS (SELECT 1 FROM TenantLeases tl WHERE tl.UnitId = u.UnitId AND tl.IsActive = 1)
+                            OR EXISTS (SELECT 1 FROM Tenants t WHERE t.UnitId = u.UnitId AND t.IsActive = 1 AND t.IsDeleted = 0)
+                          THEN 1 ELSE 0 END AS BIT) AS IsOccupied
             FROM Buildings b
             INNER JOIN Floors f ON f.BuildingId = b.BuildingId
             INNER JOIN Units u ON u.FloorId = f.FloorId
             INNER JOIN City c ON b.CityId = c.Id
             INNER JOIN UnitStatus us ON u.StatusId = us.Id
-            WHERE u.IsActive = 1
+            WHERE u.IsActive = 1 AND f.IsActive = 1 AND b.IsActive = 1
             ORDER BY b.BuildingName, f.FloorNumber, u.UnitNumber;";
 
             return await _dbHelper.ExecuteQueryReturnDataTableAsync(query);

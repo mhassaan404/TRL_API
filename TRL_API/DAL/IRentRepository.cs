@@ -29,6 +29,7 @@ namespace TRL_API.DAL
         Task<ApiResponse> BulkUpdateDueDateAsync(List<int> invoiceIds, DateTime newDueDate);
         Task<DataTable> GetActiveTenantsList();
         Task<DataTable> GetLeaseChargesForMonth(int month, int year);
+        Task<DataTable> GetTenantNamesAsync();
         Task<ApiResponse> CreateInvoice(int tenantId, decimal totalRent, DateTime invoiceDate, DateTime dueDate, string? description = null, string? chargeType = null, int? leaseId = null, int? unitId = null);
         Task<DataTable> ChargeLateFeeAsync(int invoiceId);
         Task<DataTable> GetAllPaymentsAsync(DateTime? from, DateTime? to);

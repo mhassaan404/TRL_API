@@ -21,5 +21,10 @@ namespace TRL_API.Models
         public int UpdatedBy { get; set; }
         public DateTime? UpdatedAt { get; set; }
         public bool? IsActive { get; set; }
+        // "Company" or "Individual" (required); see Helpers/TenantValidation
+        public string? TenantType { get; set; }
+        public string? ContactPerson { get; set; }
+        public string? CnicNtn { get; set; }
+        public string? Address { get; set; }
     }
 }

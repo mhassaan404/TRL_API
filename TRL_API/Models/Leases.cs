@@ -23,4 +23,10 @@
         public string Reason { get; set; } = "";
         public DateTime? MoveOutDate { get; set; } // last day the tenant occupies the unit; default today
     }
+
+    // Undo an early renewal that hasn't started: the renewal is cancelled and the current term carries on
+    public class CancelRenewalRequest
+    {
+        public int LeaseId { get; set; } // the upcoming (renewal) lease
+    }
 }

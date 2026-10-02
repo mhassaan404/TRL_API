@@ -16,7 +16,27 @@ namespace TRL_API.DAL
                 SELECT tl.LeaseId, tl.TenantId, t.Name AS TenantName, tl.UnitId, u.UnitNumber,
                        b.BuildingName, f.FloorNumber, tl.RentAmount, tl.StartDate, tl.EndDate,
                        tl.TenureMonths, tl.IsActive,
-                       CASE WHEN tl.IsActive = 1 AND tl.EndDate < CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END AS IsExpired
+                       CASE WHEN tl.IsActive = 1 AND tl.EndDate < CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END AS IsExpired,
+                       -- For the list's status only (display): how far the lease is billed, why it stopped, and
+                       -- where a renewed lease's next term starts
+                       tl.BilledThrough, tl.TerminationReason,
+                       (SELECT MIN(n.StartDate) FROM TenantLeases n
+                        WHERE n.TenantId = tl.TenantId AND n.UnitId = tl.UnitId AND n.StartDate > tl.StartDate) AS NextStartDate,
+                       -- A renewed lease is still the current term while its hand-over is intact: the next term
+                       -- starts the day after it is billed through and that term has not been ended (it is
+                       -- active, or itself renewed). Ending the tenancy breaks the hand-over.
+                       CAST(CASE WHEN tl.IsActive = 0 AND tl.TerminationReason = 'Renewed' AND EXISTS (
+                                SELECT 1 FROM TenantLeases n
+                                WHERE n.TenantId = tl.TenantId AND n.UnitId = tl.UnitId
+                                  AND n.StartDate = DATEADD(DAY, 1, tl.BilledThrough)
+                                  AND (n.IsActive = 1 OR n.TerminationReason = 'Renewed'))
+                            THEN 1 ELSE 0 END AS BIT) AS RenewedIntoNext,
+                       -- An upcoming renewal that a current lease hands over to: it can be cancelled (CancelRenewalAsync)
+                       CAST(CASE WHEN tl.IsActive = 1 AND tl.StartDate > CAST(GETDATE() AS DATE) AND EXISTS (
+                                SELECT 1 FROM TenantLeases p
+                                WHERE p.TenantId = tl.TenantId AND p.UnitId = tl.UnitId AND p.IsActive = 0
+                                  AND p.TerminationReason = 'Renewed' AND p.BilledThrough = DATEADD(DAY, -1, tl.StartDate))
+                            THEN 1 ELSE 0 END AS BIT) AS IsPendingRenewal
                 FROM TenantLeases tl
                 JOIN Tenants t ON t.TenantId = tl.TenantId
                 JOIN Units u ON u.UnitId = tl.UnitId
@@ -150,18 +170,27 @@ namespace TRL_API.DAL
         {
             string query = @"
                 SET XACT_ABORT ON;
-                DECLARE @TenantId INT, @UnitId INT, @OldRent DECIMAL(18,2), @OldEnd DATE, @NewStart DATE,
+                DECLARE @TenantId INT, @UnitId INT, @OldRent DECIMAL(18,2), @OldStart DATE, @OldEnd DATE, @NewStart DATE,
                         @Today DATE = CAST(GETDATE() AS DATE), @AdjReason NVARCHAR(300) = N'Lease renewed';
 
                 -- Lock the lease row: a second simultaneous renew waits here, then finds the lease no longer active
                 BEGIN TRAN;
-                SELECT @TenantId = TenantId, @UnitId = UnitId, @OldRent = RentAmount, @OldEnd = EndDate
+                SELECT @TenantId = TenantId, @UnitId = UnitId, @OldRent = RentAmount, @OldStart = StartDate, @OldEnd = EndDate
                 FROM TenantLeases WITH (UPDLOCK, HOLDLOCK) WHERE LeaseId = @LeaseId AND IsActive = 1;
 
                 IF @TenantId IS NULL
                 BEGIN
                     ROLLBACK;
                     SELECT 'NOT_FOUND' AS Result, CAST(NULL AS DATE) AS NewStart; RETURN;
+                END
+
+                -- Only a term that has started can be renewed. A renewal creates the next term, which starts in the
+                -- future when renewed early; renewing that unstarted term again would stack terms years ahead.
+                -- So there is at most one upcoming term, and it can be renewed once it begins.
+                IF @OldStart > @Today
+                BEGIN
+                    ROLLBACK;
+                    SELECT 'NOT_STARTED' AS Result, @OldStart AS NewStart; RETURN;
                 END
 
                 SET @NewStart = CASE WHEN @OldEnd > @Today THEN @OldEnd ELSE @Today END;
@@ -191,9 +220,104 @@ namespace TRL_API.DAL
                 new SqlParameter("@UserId", userId),
             };
             var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters);
-            return dt.Rows.Count > 0 && dt.Rows[0]["Result"].ToString() == "OK"
-                ? new ApiResponse { IsSuccess = true, Message = $"Lease renewed. The new term starts {Convert.ToDateTime(dt.Rows[0]["NewStart"]):dd MMM yyyy}." }
-                : new ApiResponse { IsSuccess = false, ErrorMessage = "Active lease not found." };
+            var result = dt.Rows.Count > 0 ? dt.Rows[0]["Result"].ToString() : null;
+            if (result == "OK")
+                return new ApiResponse { IsSuccess = true, Message = $"Lease renewed. The new term starts {Convert.ToDateTime(dt.Rows[0]["NewStart"]):dd MMM yyyy}." };
+            if (result == "NOT_STARTED")
+                return new ApiResponse
+                {
+                    IsSuccess = false,
+                    ErrorMessage = $"This lease term hasn't started yet (it starts {Convert.ToDateTime(dt.Rows[0]["NewStart"]):dd MMM yyyy}), so it can't be renewed. A lease can be renewed once its term has started.",
+                };
+            return new ApiResponse { IsSuccess = false, ErrorMessage = "Active lease not found." };
+        }
+
+        // Cancels an early renewal that hasn't started: the renewal is marked cancelled (never billed) and the lease it
+        // replaced becomes the open lease again, running to its end date and month to month after that, exactly as if
+        // it had not been renewed. Ending the tenancy is a different action (TerminateAsync).
+        // Refused when the renewal has started, when it isn't a renewal (no lease handing over to it), or when
+        // payments, discounts or waivers are recorded on its invoices (reverse those first).
+        public async Task<ApiResponse> CancelRenewalAsync(int leaseId, int userId)
+        {
+            string query = @"
+                SET XACT_ABORT ON;
+                DECLARE @TenantId INT, @UnitId INT, @Start DATE, @PrevId INT, @PrevRent DECIMAL(18,2), @PrevEnd DATE,
+                        @Today DATE = CAST(GETDATE() AS DATE), @AdjReason NVARCHAR(300) = N'Renewal cancelled';
+
+                -- Lock the renewal and the lease it replaced, like Renew/Terminate do
+                BEGIN TRAN;
+                SELECT @TenantId = TenantId, @UnitId = UnitId, @Start = StartDate
+                FROM TenantLeases WITH (UPDLOCK, HOLDLOCK) WHERE LeaseId = @LeaseId AND IsActive = 1;
+                IF @TenantId IS NULL BEGIN ROLLBACK; SELECT 'NOT_FOUND' AS Result, CAST(NULL AS DATE) AS PrevEnd; RETURN; END
+                IF @Start <= @Today BEGIN ROLLBACK; SELECT 'STARTED' AS Result, CAST(NULL AS DATE) AS PrevEnd; RETURN; END
+
+                SELECT @PrevId = LeaseId, @PrevRent = RentAmount, @PrevEnd = EndDate
+                FROM TenantLeases WITH (UPDLOCK, HOLDLOCK)
+                WHERE TenantId = @TenantId AND UnitId = @UnitId AND IsActive = 0
+                  AND TerminationReason = 'Renewed' AND BilledThrough = DATEADD(DAY, -1, @Start);
+                IF @PrevId IS NULL BEGIN ROLLBACK; SELECT 'NOT_RENEWAL' AS Result, CAST(NULL AS DATE) AS PrevEnd; RETURN; END
+
+                IF EXISTS (SELECT 1 FROM RentInvoices ri JOIN Payments p ON p.RentInvoiceId = ri.Id
+                           WHERE ri.LeaseId = @LeaseId AND ri.ChargeType IS NULL)
+                BEGIN ROLLBACK; SELECT 'HAS_PAYMENTS' AS Result, CAST(NULL AS DATE) AS PrevEnd; RETURN; END
+
+                -- Renewal first (one active lease per unit), billed through the day before it starts = never billed
+                UPDATE TenantLeases
+                SET IsActive = 0, TerminatedAt = GETDATE(), TerminationReason = 'Renewal cancelled',
+                    BilledThrough = DATEADD(DAY, -1, StartDate)
+                WHERE LeaseId = @LeaseId;
+
+                UPDATE TenantLeases
+                SET IsActive = 1, TerminatedAt = NULL, TerminationReason = NULL, BilledThrough = NULL
+                WHERE LeaseId = @PrevId;
+
+                UPDATE Tenants SET MonthlyRent = @PrevRent WHERE TenantId = @TenantId AND UnitId = @UnitId;
+
+                -- The renewal's invoices (none can have payments) are cancelled by the usual correction
+                DECLARE @Affected TABLE (LeaseId INT);
+                INSERT INTO @Affected VALUES (@LeaseId);
+                " + AdjustInvoicesAfterEndSql + @"
+
+                -- The restored lease covers its months in full again: re-price invoices the renewal had shortened
+                -- (the change-over month). The amounts only go up, so no discount needs reducing.
+                DECLARE @Up TABLE (InvoiceId INT PRIMARY KEY, NewAmount DECIMAL(18,2), Descr NVARCHAR(200));
+                INSERT INTO @Up
+                SELECT ri.Id, c.Amount, c.Descr
+                FROM RentInvoices ri
+                CROSS APPLY dbo.LeaseMonthCharge(ri.LeaseId, ri.InvoiceMonth) c
+                WHERE ri.LeaseId = @PrevId AND ri.ChargeType IS NULL AND ri.StatusId <> 6 AND c.Amount <> ri.TotalRent;
+
+                UPDATE ri SET TotalRent = u.NewAmount, Description = u.Descr
+                FROM RentInvoices ri JOIN @Up u ON u.InvoiceId = ri.Id;
+
+                INSERT INTO InvoiceAudit (InvoiceId, Action, Amount, Reason, CreatedBy)
+                SELECT InvoiceId, 'RENT_ADJUSTED', NewAmount, @AdjReason, @UserId FROM @Up;
+
+                " + InvoiceSql.Recalc + @"
+                JOIN @Up u ON u.InvoiceId = ri.Id;
+
+                COMMIT;
+                SELECT 'OK' AS Result, @PrevEnd AS PrevEnd;";
+
+            var parameters = new[]
+            {
+                new SqlParameter("@LeaseId", leaseId),
+                new SqlParameter("@UserId", userId),
+            };
+            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters);
+            var result = dt.Rows.Count > 0 ? dt.Rows[0]["Result"].ToString() : null;
+            return result switch
+            {
+                "OK" => new ApiResponse
+                {
+                    IsSuccess = true,
+                    Message = $"Renewal cancelled. The current lease continues to {Convert.ToDateTime(dt.Rows[0]["PrevEnd"]):dd MMM yyyy} (month to month after that until renewed or ended).",
+                },
+                "STARTED" => new ApiResponse { IsSuccess = false, ErrorMessage = "This term has already started, so it can't be cancelled as a renewal. Use End to end the lease." },
+                "NOT_RENEWAL" => new ApiResponse { IsSuccess = false, ErrorMessage = "This lease isn't a renewal of a current lease, so there's nothing to restore. Use End to cancel it." },
+                "HAS_PAYMENTS" => new ApiResponse { IsSuccess = false, ErrorMessage = "Payments, discounts or waivers are recorded on this renewal's invoices. Reverse them first." },
+                _ => new ApiResponse { IsSuccess = false, ErrorMessage = "Active lease not found." },
+            };
         }
 
         // Ends the lease on the move-out date: rent is billed through that day and stops after it.

@@ -1,6 +1,7 @@
 ﻿using Microsoft.Data.SqlClient;
 using System.Data;
 using TRL_API.DAL;
+using TRL_API.Helpers;
 using TRL_API.Models;
 
 namespace TRL_API.BLL
@@ -21,9 +22,12 @@ namespace TRL_API.BLL
 
         public async Task<ApiResponse> SaveTenantAsync(Tenants tenant)
         {
+            var invalid = TenantValidation.Normalize(tenant);
+            if (invalid != null)
+                return new ApiResponse { IsSuccess = false, Message = invalid };
+
             try
             {
-
                 var result = await _dal.SaveTenantAsync(tenant);
 
                 if (result.IsSuccess)
@@ -40,9 +44,12 @@ namespace TRL_API.BLL
 
         public async Task<ApiResponse> UpdateTenantAsync(Tenants tenant)
         {
+            var invalid = TenantValidation.Normalize(tenant);
+            if (invalid != null)
+                return new ApiResponse { IsSuccess = false, Message = invalid };
+
             try
             {
-                // ADDED: auto-fill rent from the unit if not provided
 
                 // Leases drive occupancy and billing: moving a tenant out goes through Lease > Terminate
                 if (tenant.IsActive != true && await _dal.HasActiveLeaseAsync(tenant.TenantId))

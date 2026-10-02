@@ -243,25 +243,48 @@ namespace TRL_API.BLL
             if (dueInDays < 0 || dueInDays > 90)
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "Due days must be between 0 and 90." };
 
-            var eligible = await _dal.GetLeaseChargesForMonth(month, year);
+            var monthStart = new DateTime(year, month, 1);
+            bool allTenants = tenantIds == null || tenantIds.Count == 0;
 
-            var rowsToGenerate = (tenantIds == null || tenantIds.Count == 0)
-                ? eligible.AsEnumerable()
-                : eligible.AsEnumerable().Where(r => tenantIds.Contains(Convert.ToInt32(r["TenantId"])));
+            // Leases covering the month for the selected tenants; those not invoiced yet are the ones to bill
+            var covering = (await _dal.GetLeaseChargesForMonth(month, year)).AsEnumerable()
+                .Where(r => allTenants || tenantIds!.Contains(Convert.ToInt32(r["TenantId"])))
+                .ToList();
+            var rowList = covering.Where(r => !Convert.ToBoolean(r["AlreadyInvoiced"])).ToList();
 
-            var rowList = rowsToGenerate.ToList();
+            // Selected tenants with no lease for this month can't be billed: name them instead of
+            // reporting them as "already invoiced"
+            string withoutLease = "";
+            if (!allTenants)
+            {
+                var covered = covering.Select(r => Convert.ToInt32(r["TenantId"])).ToHashSet();
+                var names = (await _dal.GetTenantNamesAsync()).AsEnumerable()
+                    .Where(r => tenantIds!.Contains(Convert.ToInt32(r["TenantId"])) && !covered.Contains(Convert.ToInt32(r["TenantId"])))
+                    .Select(r => r["Name"].ToString())
+                    .ToList();
+                if (names.Count > 0) withoutLease = string.Join(", ", names);
+            }
 
             if (rowList.Count == 0)
             {
+                // No lease at all is something to fix (shown as an error); "already invoiced" is the normal safe re-run
+                if (covering.Count == 0)
+                {
+                    var noLease = allTenants
+                        ? $"No lease covers {monthStart:MMMM yyyy}, so there is no rent to generate. Create a lease in Lease Management first."
+                        : $"No lease covers {monthStart:MMMM yyyy} for: {withoutLease}. Create a lease in Lease Management first.";
+                    return new ApiResponse { IsSuccess = false, RowsAffected = 0, Message = noLease, ErrorMessage = noLease };
+                }
+
                 return new ApiResponse
                 {
                     IsSuccess = true,
                     RowsAffected = 0,
-                    Message = "Nothing to generate — every lease covering this month for the selected tenant(s) is already invoiced.",
+                    Message = $"Nothing to generate — every lease covering {monthStart:MMMM yyyy} for the selected tenant(s) is already invoiced."
+                        + (withoutLease != "" ? $" No lease for: {withoutLease}." : ""),
                 };
             }
 
-            var monthStart = new DateTime(year, month, 1);
             int created = 0;
 
             foreach (var row in rowList)
@@ -291,7 +314,8 @@ namespace TRL_API.BLL
             {
                 IsSuccess = true,
                 RowsAffected = created,
-                Message = $"{created} invoice(s) generated for {monthStart:MMMM yyyy}.",
+                Message = $"{created} invoice(s) generated for {monthStart:MMMM yyyy}."
+                    + (withoutLease != "" ? $" Skipped (no lease for this month): {withoutLease}." : ""),
             };
         }
 

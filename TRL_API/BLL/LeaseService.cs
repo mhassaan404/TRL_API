@@ -70,6 +70,20 @@ namespace TRL_API.BLL
             return await _dal.TerminateAsync(req, moveOut, userId);
         }
 
+        // Same limits as creating a lease; the billing rules are checked in LeaseRepository.UpdateAsync
+        public async Task<ApiResponse> UpdateAsync(UpdateLeaseRequest req)
+        {
+            if (req.LeaseId <= 0)
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "Lease is required." };
+            if (req.StartDate == null)
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "Start date is required." };
+            if (req.RentAmount is null or <= 0)
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "Rent must be greater than zero." };
+            if (req.TenureMonths is null or <= 0)
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "Tenure must be at least 1 month." };
+            return await _dal.UpdateAsync(req.LeaseId, req.StartDate.Value.Date, req.RentAmount.Value, req.TenureMonths.Value);
+        }
+
         public async Task<ApiResponse> CancelLeaseAsync(CancelLeaseRequest req, int userId)
         {
             if (req.LeaseId <= 0)

@@ -13,5 +13,6 @@ namespace TRL_API.BLL
         Task<ApiResponse> TerminateAsync(TerminateLeaseRequest req, int userId);
         Task<ApiResponse> CancelRenewalAsync(CancelRenewalRequest req, int userId);
         Task<ApiResponse> CancelLeaseAsync(CancelLeaseRequest req, int userId);
+        Task<ApiResponse> UpdateAsync(UpdateLeaseRequest req);
     }
 }

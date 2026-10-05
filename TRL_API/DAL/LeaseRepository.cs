@@ -36,7 +36,11 @@ namespace TRL_API.DAL
                                 SELECT 1 FROM TenantLeases p
                                 WHERE p.TenantId = tl.TenantId AND p.UnitId = tl.UnitId AND p.IsActive = 0
                                   AND p.TerminationReason = 'Renewed' AND p.BilledThrough = DATEADD(DAY, -1, tl.StartDate))
-                            THEN 1 ELSE 0 END AS BIT) AS IsPendingRenewal
+                            THEN 1 ELSE 0 END AS BIT) AS IsPendingRenewal,
+                       -- Rent already invoiced (not cancelled): Edit can then only change the tenure (UpdateAsync)
+                       CAST(CASE WHEN EXISTS (SELECT 1 FROM RentInvoices ri
+                                              WHERE ri.LeaseId = tl.LeaseId AND ri.ChargeType IS NULL AND ri.StatusId <> 6)
+                            THEN 1 ELSE 0 END AS BIT) AS HasRentInvoices
                 FROM TenantLeases tl
                 JOIN Tenants t ON t.TenantId = tl.TenantId
                 JOIN Units u ON u.UnitId = tl.UnitId
@@ -392,6 +396,88 @@ namespace TRL_API.DAL
                 {
                     IsSuccess = false,
                     ErrorMessage = $"The move-out date can't be before the lease start date ({Convert.ToDateTime(dt.Rows[0]["StartDate"]):dd MMM yyyy}).",
+                },
+                _ => new ApiResponse { IsSuccess = false, ErrorMessage = "Active lease not found." },
+            };
+        }
+
+        // Corrects an open lease (Edit). The tenure can always be changed (it only moves the end date; billing
+        // continues month to month after it anyway). The start date and rent decide what is billed, so they can only
+        // change while the lease has no rent invoices (cancel those in Rent History first): no invoice is ever
+        // re-priced here. A renewal's start date is fixed (the previous term is billed through the day before it),
+        // and a new start date may not overlap a previous lease's billed period on the unit (same rule as Create).
+        public async Task<ApiResponse> UpdateAsync(int leaseId, DateTime startDate, decimal rentAmount, int tenureMonths)
+        {
+            string query = @"
+                SET XACT_ABORT ON;
+                DECLARE @TenantId INT, @UnitId INT, @OldStart DATE, @OldRent DECIMAL(18,2), @OldTenure INT, @Overlap DATE;
+
+                -- Lock the lease like Renew/Terminate do, so an edit can't race another lease action
+                BEGIN TRAN;
+                SELECT @TenantId = TenantId, @UnitId = UnitId, @OldStart = StartDate, @OldRent = RentAmount, @OldTenure = TenureMonths
+                FROM TenantLeases WITH (UPDLOCK, HOLDLOCK) WHERE LeaseId = @LeaseId AND IsActive = 1;
+                IF @TenantId IS NULL BEGIN ROLLBACK; SELECT 'NOT_FOUND' AS Result, CAST(NULL AS DATE) AS Info; RETURN; END
+
+                DECLARE @StartChanged BIT = CASE WHEN @StartDate <> @OldStart THEN 1 ELSE 0 END,
+                        @RentChanged BIT = CASE WHEN @RentAmount <> @OldRent THEN 1 ELSE 0 END;
+
+                IF @StartChanged = 0 AND @RentChanged = 0 AND @TenureMonths = @OldTenure
+                BEGIN ROLLBACK; SELECT 'NO_CHANGE' AS Result, CAST(NULL AS DATE) AS Info; RETURN; END
+
+                IF (@StartChanged = 1 OR @RentChanged = 1) AND EXISTS (
+                    SELECT 1 FROM RentInvoices WHERE LeaseId = @LeaseId AND ChargeType IS NULL AND StatusId <> 6)
+                BEGIN ROLLBACK; SELECT 'BILLED' AS Result, CAST(NULL AS DATE) AS Info; RETURN; END
+
+                IF @StartChanged = 1 AND EXISTS (
+                    SELECT 1 FROM TenantLeases WHERE TenantId = @TenantId AND UnitId = @UnitId AND LeaseId <> @LeaseId
+                      AND TerminationReason = 'Renewed' AND BilledThrough = DATEADD(DAY, -1, @OldStart))
+                BEGIN ROLLBACK; SELECT 'RENEWAL_START' AS Result, CAST(NULL AS DATE) AS Info; RETURN; END
+
+                IF @StartChanged = 1
+                BEGIN
+                    SELECT @Overlap = MAX(BilledThrough) FROM TenantLeases
+                    WHERE UnitId = @UnitId AND LeaseId <> @LeaseId AND IsActive = 0
+                      AND BilledThrough >= @StartDate AND BilledThrough >= StartDate;
+                    IF @Overlap IS NOT NULL BEGIN ROLLBACK; SELECT 'OVERLAP' AS Result, @Overlap AS Info; RETURN; END
+                END
+
+                UPDATE TenantLeases SET StartDate = @StartDate, RentAmount = @RentAmount, TenureMonths = @TenureMonths
+                WHERE LeaseId = @LeaseId;
+
+                -- Tenants.MonthlyRent caches the rent of the tenant's lease on this unit (Create/Renew keep it the same way)
+                IF @RentChanged = 1
+                    UPDATE Tenants SET MonthlyRent = @RentAmount WHERE TenantId = @TenantId AND UnitId = @UnitId;
+
+                COMMIT;
+                SELECT 'OK' AS Result, CAST(NULL AS DATE) AS Info;";
+
+            var parameters = new[]
+            {
+                new SqlParameter("@LeaseId", leaseId),
+                new SqlParameter("@StartDate", SqlDbType.Date) { Value = startDate.Date },
+                new SqlParameter("@RentAmount", SqlDbType.Decimal) { Precision = 18, Scale = 2, Value = rentAmount },
+                new SqlParameter("@TenureMonths", tenureMonths),
+            };
+            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters);
+            var result = dt.Rows.Count > 0 ? dt.Rows[0]["Result"].ToString() : null;
+            return result switch
+            {
+                "OK" => new ApiResponse { IsSuccess = true, Message = "Lease updated." },
+                "NO_CHANGE" => new ApiResponse { IsSuccess = false, ErrorMessage = "Nothing was changed." },
+                "BILLED" => new ApiResponse
+                {
+                    IsSuccess = false,
+                    ErrorMessage = "This lease already has rent invoices, so its start date and rent can't be changed. Cancel its open rent invoices in Rent History first, then edit the lease and generate the rent again.",
+                },
+                "RENEWAL_START" => new ApiResponse
+                {
+                    IsSuccess = false,
+                    ErrorMessage = "This is a renewal: its start date follows on from the previous term, so it can't be changed. You can still change the rent and tenure.",
+                },
+                "OVERLAP" => new ApiResponse
+                {
+                    IsSuccess = false,
+                    ErrorMessage = $"This unit is billed to an earlier lease through {Convert.ToDateTime(dt.Rows[0]["Info"]):dd MMM yyyy}. Choose a start date after that.",
                 },
                 _ => new ApiResponse { IsSuccess = false, ErrorMessage = "Active lease not found." },
             };

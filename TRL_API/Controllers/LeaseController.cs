@@ -30,6 +30,15 @@ namespace TRL_API.Controllers
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
 
+        // Correct an open lease's start date, rent or tenure (rules in LeaseRepository.UpdateAsync)
+        [Authorize(Roles = "Admin")]
+        [HttpPost("Update")]
+        public async Task<IActionResult> Update(UpdateLeaseRequest req)
+        {
+            var response = await _service.UpdateAsync(req);
+            return response.IsSuccess ? Ok(response) : BadRequest(response);
+        }
+
         [Authorize(Roles = "Admin")]
         [HttpPost("Renew")]
         public async Task<IActionResult> Renew(RenewLeaseRequest req)

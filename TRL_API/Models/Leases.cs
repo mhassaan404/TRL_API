@@ -30,6 +30,15 @@
         public int LeaseId { get; set; } // the upcoming (renewal) lease
     }
 
+    // Correct an open lease's start date, rent or tenure (Edit on Lease Management)
+    public class UpdateLeaseRequest
+    {
+        public int LeaseId { get; set; }
+        public DateTime? StartDate { get; set; }
+        public decimal? RentAmount { get; set; }
+        public int? TenureMonths { get; set; }
+    }
+
     // Undo a lease created by mistake: it is cancelled and never billed
     public class CancelLeaseRequest
     {

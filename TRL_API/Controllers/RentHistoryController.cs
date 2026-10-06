@@ -35,7 +35,7 @@ namespace TRL_API.Controllers
             if (invoiceId <= 0)
                 return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "Invoice is required." });
 
-            var (invoice, payments, events) = await _service.GetInvoiceDetailsAsync(invoiceId);
+            var (invoice, payments, events, charges) = await _service.GetInvoiceDetailsAsync(invoiceId);
             if (invoice.Rows.Count == 0)
                 return NotFound(new ApiResponse { IsSuccess = false, ErrorMessage = "Invoice not found." });
 
@@ -44,6 +44,7 @@ namespace TRL_API.Controllers
                 invoice = DataTableHelper.ToDictionaryList(invoice, true)[0],
                 payments = DataTableHelper.ToDictionaryList(payments, true),
                 events = DataTableHelper.ToDictionaryList(events, true),
+                linkedCharges = DataTableHelper.ToDictionaryList(charges, true),
             });
         }
 

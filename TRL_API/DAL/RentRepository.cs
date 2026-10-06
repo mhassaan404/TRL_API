@@ -44,6 +44,8 @@ namespace TRL_API.DAL
                     ri.Id AS InvoiceId,
                     ri.InvoiceDate,
                     ri.PendingAmount,
+                    ri.TotalRent,
+                    ri.ChargeType,
                     s.StatusName AS Status,
                     u.UnitNumber,
                     f.FloorNumber,
@@ -606,6 +608,69 @@ namespace TRL_API.DAL
             };
 
             return await _dbHelper.ExecuteQueryAsync(query, parameters);
+        }
+
+        // Extra charges: one new invoice per tenant, all in one transaction (all or nothing). Creation is serialized
+        // (app lock), so a double submit finds the first one and is refused as a duplicate (same tenant, type, amount,
+        // description, charge date and related invoice within the last minute). Tenants must exist (not deleted);
+        // the related invoice must belong to the tenant. No existing invoice or payment is changed.
+        // Result: one row per created invoice ('OK', Info = invoice id), or one row with the reason it was refused.
+        public async Task<DataTable> CreateExtraChargesAsync(IReadOnlyList<int> tenantIds, DateTime chargeDate, DateTime dueDate,
+            string chargeType, string? description, decimal amount, int? relatedInvoiceId, decimal lateFeePerDay, decimal lateFeeMaxMultiplier)
+        {
+            var tenantValues = string.Join(", ", tenantIds.Select((_, i) => $"(@T{i})"));
+            string query = $@"
+                SET XACT_ABORT ON;
+                DECLARE @T TABLE (TenantId INT PRIMARY KEY);
+                INSERT INTO @T (TenantId) VALUES {tenantValues};
+                DECLARE @New TABLE (Id INT);
+
+                BEGIN TRAN;
+                DECLARE @Lock INT;
+                EXEC @Lock = sp_getapplock @Resource = 'TRL_CreateExtraCharge', @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 15000;
+                IF @Lock < 0 BEGIN ROLLBACK; SELECT 'BUSY' AS Result, CAST(NULL AS INT) AS Info; RETURN; END
+
+                IF EXISTS (SELECT 1 FROM @T x WHERE NOT EXISTS (SELECT 1 FROM Tenants t WHERE t.TenantId = x.TenantId AND t.IsDeleted = 0))
+                BEGIN ROLLBACK; SELECT 'BAD_TENANT' AS Result, CAST(NULL AS INT) AS Info; RETURN; END
+
+                IF @RelatedInvoiceId IS NOT NULL AND NOT EXISTS (
+                    SELECT 1 FROM RentInvoices ri JOIN @T x ON x.TenantId = ri.TenantId WHERE ri.Id = @RelatedInvoiceId)
+                BEGIN ROLLBACK; SELECT 'BAD_RELATED' AS Result, CAST(NULL AS INT) AS Info; RETURN; END
+
+                IF EXISTS (SELECT 1 FROM RentInvoices ri JOIN @T x ON x.TenantId = ri.TenantId
+                           WHERE ri.ChargeType = @ChargeType AND ri.TotalRent = @Amount AND ri.InvoiceDate = @ChargeDate
+                             AND ISNULL(ri.Description, N'') = ISNULL(@Description, N'')
+                             AND ISNULL(ri.RelatedInvoiceId, 0) = ISNULL(@RelatedInvoiceId, 0)
+                             AND ri.StatusId <> 6 AND ri.CreatedAt >= DATEADD(SECOND, -60, GETDATE()))
+                BEGIN ROLLBACK; SELECT 'DUPLICATE' AS Result, CAST(NULL AS INT) AS Info; RETURN; END
+
+                -- Unit: the related invoice's unit, otherwise the tenant's current unit. Never linked to a lease, so lease
+                -- billing (which only looks at ChargeType IS NULL) is unaffected. StatusId 2 = Unpaid.
+                INSERT INTO RentInvoices
+                    (TenantId, LeaseId, UnitId, TotalRent, PendingAmount, OverPaidAmount, InvoiceDate, DueDate, StatusId,
+                     Description, ChargeType, CreatedAt, LateFeePerDay, LateFeeMaxMultiplier, RelatedInvoiceId)
+                OUTPUT inserted.Id INTO @New
+                SELECT x.TenantId, NULL, COALESCE((SELECT UnitId FROM RentInvoices WHERE Id = @RelatedInvoiceId), t.UnitId),
+                       @Amount, @Amount, 0, @ChargeDate, @DueDate, 2,
+                       @Description, @ChargeType, GETDATE(), @LateFeePerDay, @LateFeeMaxMultiplier, @RelatedInvoiceId
+                FROM @T x JOIN Tenants t ON t.TenantId = x.TenantId;
+
+                COMMIT;
+                SELECT 'OK' AS Result, Id AS Info FROM @New ORDER BY Id;";
+
+            var parameters = tenantIds.Select((id, i) => new SqlParameter($"@T{i}", id)).ToList();
+            parameters.AddRange(new[]
+            {
+                new SqlParameter("@ChargeDate", SqlDbType.Date) { Value = chargeDate.Date },
+                new SqlParameter("@DueDate", SqlDbType.Date) { Value = dueDate.Date },
+                new SqlParameter("@ChargeType", SqlDbType.NVarChar, 50) { Value = chargeType },
+                new SqlParameter("@Description", SqlDbType.NVarChar, 255) { Value = (object?)description ?? DBNull.Value },
+                new SqlParameter("@Amount", SqlDbType.Decimal) { Precision = 18, Scale = 2, Value = amount },
+                new SqlParameter("@RelatedInvoiceId", SqlDbType.Int) { Value = (object?)relatedInvoiceId ?? DBNull.Value },
+                new SqlParameter("@LateFeePerDay", SqlDbType.Decimal) { Precision = 18, Scale = 2, Value = lateFeePerDay },
+                new SqlParameter("@LateFeeMaxMultiplier", SqlDbType.Decimal) { Precision = 5, Scale = 2, Value = lateFeeMaxMultiplier },
+            });
+            return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters.ToArray());
         }
 
 

@@ -25,7 +25,7 @@ namespace TRL_API.BLL
         Task<ApiResponse> BulkUpdateDueDateAsync(List<int> invoiceIds, DateTime newDueDate);
         Task<DataTable> GetActiveTenantsAsync();
         Task<ApiResponse> GenerateInvoicesAsync(int month, int year, int? dueInDays, List<int>? tenantIds);
-        Task<ApiResponse> CreateExtraChargeAsync(List<int> tenantIds, int month, int year, string chargeType, string description, decimal amount, int? dueInDays);
+        Task<ApiResponse> CreateExtraChargeAsync(ExtraChargeRequest req);
         Task<DataTable> GetAllPaymentsAsync(DateTime? from, DateTime? to);
         Task<ApiResponse> ChargeLateFeeAsync(int invoiceId);
     }

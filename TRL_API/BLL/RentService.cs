@@ -332,39 +332,69 @@ namespace TRL_API.BLL
         // Creates one standalone invoice per selected tenant for a one-off charge
         // (Maintenance, Late Fine, Security Deposit, etc.) — separate from their
         // regular monthly rent invoice, clearly labeled via Description/ChargeType.
-        public async Task<ApiResponse> CreateExtraChargeAsync(
-            List<int> tenantIds, int month, int year, string chargeType, string description, decimal amount, int? dueInDays)
+        public static readonly string[] ExtraChargeTypes = { "Maintenance", "Utility", "Damage", "Rent Correction", "Other" };
+        private static readonly string[] TypesNeedingDescription = { "Rent Correction", "Other" };
+        public const decimal MaxExtraChargeAmount = 10_000_000;
+
+        // Input checks for an extra charge (the tenant/related-invoice checks run in the database, in one transaction)
+        public static string? ValidateExtraCharge(ExtraChargeRequest? req, DateTime today)
         {
-            if (tenantIds == null || tenantIds.Count == 0)
-                return new ApiResponse { IsSuccess = false, ErrorMessage = "Select at least one tenant." };
-
-            if (amount <= 0)
-                return new ApiResponse { IsSuccess = false, ErrorMessage = "Amount must be greater than zero." };
-            if (month < 1 || month > 12 || year < 2000 || year > 2100)
-                return new ApiResponse { IsSuccess = false, ErrorMessage = "Select a valid month and year." };
-            if (dueInDays < 0 || dueInDays > 90)
-                return new ApiResponse { IsSuccess = false, ErrorMessage = "Due days must be between 0 and 90." };
-            if (string.IsNullOrWhiteSpace(chargeType))
-                return new ApiResponse { IsSuccess = false, ErrorMessage = "Charge type is required." };
-
-            // null = the Payment Due Days setting; the charge also keeps the current late-fee rule
-            var settings = await _lateFeeSettings.GetAsync();
-            var invoiceDate = new DateTime(year, month, 1);
-            var dueDate = invoiceDate.AddDays(dueInDays ?? settings.PaymentDueDays);
-            int created = 0;
-
-            foreach (var tenantId in tenantIds)
+            if (req == null) return "Please enter the charge.";
+            if (req.TenantIds == null || req.TenantIds.Count == 0) return "Select at least one tenant.";
+            if (req.TenantIds.Any(id => id <= 0)) return "One or more selected tenants are invalid.";
+            if (req.TenantIds.Count > 1000) return "Select at most 1,000 tenants at a time.";
+            if (!ExtraChargeTypes.Contains(req.ChargeType)) return $"Charge type must be one of: {string.Join(", ", ExtraChargeTypes)}.";
+            if (req.Amount <= 0 || req.Amount > MaxExtraChargeAmount) return $"Amount must be greater than 0 and at most {MaxExtraChargeAmount:N0}.";
+            if (req.Amount != decimal.Round(req.Amount, 2)) return "Amount can have at most 2 decimal places.";
+            var description = req.Description?.Trim() ?? "";
+            if (description.Length > 255) return "Description can be at most 255 characters.";
+            if (description.Length == 0 && TypesNeedingDescription.Contains(req.ChargeType)) return $"Please describe the {req.ChargeType} charge.";
+            if (req.DueInDays is < 0 or > 90) return "Due days must be between 0 and 90.";
+            var date = (req.ChargeDate ?? today).Date;
+            if (date < today.AddYears(-1) || date > today.AddMonths(1)) return "Charge date must be within the last 12 months or the next month.";
+            if (req.RelatedInvoiceId != null)
             {
-                var result = await _dal.CreateInvoice(tenantId, amount, invoiceDate, dueDate,
-                    settings.LateFeePerDay, settings.MaxLateFeeMultiplier, description, chargeType);
-                if (result.IsSuccess) created++;
+                if (req.RelatedInvoiceId <= 0) return "The related invoice is invalid.";
+                if (req.TenantIds.Distinct().Count() != 1) return "A related invoice can only be set when charging one tenant.";
             }
+            return null;
+        }
 
-            return new ApiResponse
+        // Creates one separate invoice per tenant: invoice date = charge date (default today), due date = charge date +
+        // due days (default the Payment Due Days setting), late fee per the current setting unless switched off.
+        // All or nothing; the related invoice (if any) is never changed.
+        public async Task<ApiResponse> CreateExtraChargeAsync(ExtraChargeRequest req)
+        {
+            var error = ValidateExtraCharge(req, DateTime.Today);
+            if (error != null)
+                return new ApiResponse { IsSuccess = false, ErrorMessage = error };
+
+            var settings = await _lateFeeSettings.GetAsync();
+            var chargeDate = (req.ChargeDate ?? DateTime.Today).Date;
+            var dueDate = chargeDate.AddDays(req.DueInDays ?? settings.PaymentDueDays);
+            var tenantIds = req.TenantIds.Distinct().ToList();
+            var description = string.IsNullOrWhiteSpace(req.Description) ? null : req.Description.Trim();
+
+            var dt = await _dal.CreateExtraChargesAsync(tenantIds, chargeDate, dueDate, req.ChargeType, description, req.Amount,
+                req.RelatedInvoiceId, req.ApplyLateFee ? settings.LateFeePerDay : 0, settings.MaxLateFeeMultiplier);
+            var result = dt.Rows.Count > 0 ? dt.Rows[0]["Result"].ToString() : null;
+
+            return result switch
             {
-                IsSuccess = true,
-                RowsAffected = created,
-                Message = $"{chargeType} charge of {amount:C} added for {created} tenant(s).",
+                "OK" => new ApiResponse
+                {
+                    IsSuccess = true,
+                    RowsAffected = dt.Rows.Count,
+                    Id = dt.Rows.Count == 1 ? Convert.ToInt32(dt.Rows[0]["Info"]) : null,
+                    Message = dt.Rows.Count == 1
+                        ? $"{req.ChargeType} charge of {req.Amount:N0} added as invoice #{dt.Rows[0]["Info"]}, due {dueDate:dd MMM yyyy}."
+                        : $"{req.ChargeType} charge of {req.Amount:N0} added for {dt.Rows.Count} tenants, due {dueDate:dd MMM yyyy}.",
+                },
+                "BAD_TENANT" => new ApiResponse { IsSuccess = false, ErrorMessage = "One or more selected tenants don't exist. Nothing was added." },
+                "BAD_RELATED" => new ApiResponse { IsSuccess = false, ErrorMessage = "The related invoice doesn't exist or belongs to another tenant. Nothing was added." },
+                "DUPLICATE" => new ApiResponse { IsSuccess = false, ErrorMessage = "This charge was just added. It wasn't added again." },
+                "BUSY" => new ApiResponse { IsSuccess = false, ErrorMessage = "Another charge is being added right now. Please try again." },
+                _ => new ApiResponse { IsSuccess = false, ErrorMessage = "The charge could not be added." },
             };
         }
 

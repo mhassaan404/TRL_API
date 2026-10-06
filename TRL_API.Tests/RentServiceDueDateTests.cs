@@ -95,16 +95,76 @@ namespace TRL_API.Tests
             await rent.DidNotReceiveWithAnyArgs().CreateInvoice(default, default, default, default, default, default);
         }
 
+        private static DataTable Created(params int[] ids)
+        {
+            var dt = new DataTable();
+            dt.Columns.Add("Result", typeof(string));
+            dt.Columns.Add("Info", typeof(int));
+            foreach (var id in ids) dt.Rows.Add("OK", id);
+            return dt;
+        }
+
         [Fact]
-        public async Task Extra_charges_use_the_due_days_setting_and_keep_the_rate_and_cap()
+        public async Task Extra_charges_default_to_today_and_the_due_days_setting_and_keep_the_rate_and_cap()
         {
             var (svc, rent) = Create(Settings(10, 300, 1), LeaseCharges());
+            rent.CreateExtraChargesAsync(default!, default, default, default!, default, default, default, default, default).ReturnsForAnyArgs(Created(71, 72));
 
-            var res = await svc.CreateExtraChargeAsync(new List<int> { 5, 6 }, ThisMonth.Month, ThisMonth.Year, "Maintenance", "Paint", 2500, null);
+            var res = await svc.CreateExtraChargeAsync(new ExtraChargeRequest { TenantIds = new() { 5, 6, 5 }, ChargeType = "Maintenance", Description = " Paint ", Amount = 2500 });
 
             Assert.True(res.IsSuccess);
-            await rent.Received(1).CreateInvoice(5, 2500m, ThisMonth, ThisMonth.AddDays(10), 300m, 1m, "Paint", "Maintenance");
-            await rent.Received(1).CreateInvoice(6, 2500m, ThisMonth, ThisMonth.AddDays(10), 300m, 1m, "Paint", "Maintenance");
+            Assert.Equal(2, res.RowsAffected);
+            await rent.Received(1).CreateExtraChargesAsync(
+                Arg.Is<IReadOnlyList<int>>(t => t.SequenceEqual(new[] { 5, 6 })), DateTime.Today, DateTime.Today.AddDays(10),
+                "Maintenance", "Paint", 2500m, null, 300m, 1m);
+        }
+
+        [Fact]
+        public async Task Extra_charge_without_late_fee_stores_a_zero_daily_rate_and_uses_the_given_date_and_due_days()
+        {
+            var (svc, rent) = Create(Settings(10, 300, 1), LeaseCharges());
+            rent.CreateExtraChargesAsync(default!, default, default, default!, default, default, default, default, default).ReturnsForAnyArgs(Created(80));
+            var date = DateTime.Today.AddDays(-3);
+
+            var res = await svc.CreateExtraChargeAsync(new ExtraChargeRequest
+            {
+                TenantIds = new() { 9 }, ChargeType = "Rent Correction", Description = "Rent 01-04 Oct", Amount = 4000,
+                ChargeDate = date, DueInDays = 2, RelatedInvoiceId = 33, ApplyLateFee = false,
+            });
+
+            Assert.True(res.IsSuccess);
+            Assert.Equal(80, res.Id);
+            await rent.Received(1).CreateExtraChargesAsync(
+                Arg.Is<IReadOnlyList<int>>(t => t.SequenceEqual(new[] { 9 })), date, date.AddDays(2),
+                "Rent Correction", "Rent 01-04 Oct", 4000m, 33, 0m, 1m);
+        }
+
+        public static IEnumerable<object[]> InvalidExtraCharges() => new[]
+        {
+            new object[] { new ExtraChargeRequest { TenantIds = new(), ChargeType = "Maintenance", Amount = 1 }, "Select at least one tenant." },
+            new object[] { new ExtraChargeRequest { TenantIds = new() { 0 }, ChargeType = "Maintenance", Amount = 1 }, "One or more selected tenants are invalid." },
+            new object[] { new ExtraChargeRequest { TenantIds = new() { 1 }, ChargeType = "Security Deposit", Amount = 1 }, "Charge type must be one of: Maintenance, Utility, Damage, Rent Correction, Other." },
+            new object[] { new ExtraChargeRequest { TenantIds = new() { 1 }, ChargeType = "Maintenance", Amount = 0 }, "Amount must be greater than 0 and at most 10,000,000." },
+            new object[] { new ExtraChargeRequest { TenantIds = new() { 1 }, ChargeType = "Maintenance", Amount = 1.005m }, "Amount can have at most 2 decimal places." },
+            new object[] { new ExtraChargeRequest { TenantIds = new() { 1 }, ChargeType = "Rent Correction", Amount = 1 }, "Please describe the Rent Correction charge." },
+            new object[] { new ExtraChargeRequest { TenantIds = new() { 1 }, ChargeType = "Other", Amount = 1, Description = "  " }, "Please describe the Other charge." },
+            new object[] { new ExtraChargeRequest { TenantIds = new() { 1 }, ChargeType = "Maintenance", Amount = 1, DueInDays = 91 }, "Due days must be between 0 and 90." },
+            new object[] { new ExtraChargeRequest { TenantIds = new() { 1 }, ChargeType = "Maintenance", Amount = 1, ChargeDate = DateTime.Today.AddMonths(2) }, "Charge date must be within the last 12 months or the next month." },
+            new object[] { new ExtraChargeRequest { TenantIds = new() { 1, 2 }, ChargeType = "Rent Correction", Description = "x", Amount = 1, RelatedInvoiceId = 5 }, "A related invoice can only be set when charging one tenant." },
+            new object[] { new ExtraChargeRequest { TenantIds = new() { 1 }, ChargeType = "Maintenance", Amount = 1, Description = new string('x', 256) }, "Description can be at most 255 characters." },
+        };
+
+        [Theory]
+        [MemberData(nameof(InvalidExtraCharges))]
+        public async Task Invalid_extra_charges_are_rejected_before_the_database(ExtraChargeRequest req, string message)
+        {
+            var (svc, rent) = Create(Settings(5, 500, 2), LeaseCharges());
+
+            var res = await svc.CreateExtraChargeAsync(req);
+
+            Assert.False(res.IsSuccess);
+            Assert.Equal(message, res.ErrorMessage);
+            await rent.DidNotReceiveWithAnyArgs().CreateExtraChargesAsync(default!, default, default, default!, default, default, default, default, default);
         }
     }
 }

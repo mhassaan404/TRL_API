@@ -24,7 +24,9 @@ namespace TRL_API.DAL
                        CASE WHEN ri.StatusId = 6 THEN 0 ELSE bal.Balance END AS Balance,
                        bal.LastPaymentDate,
                        COALESCE(pt.Methods, 'N/A') AS PaymentMethod,
-                       COALESCE(sl.StatusName, 'Unknown') AS Status
+                       COALESCE(sl.StatusName, 'Unknown') AS Status,
+                       -- Any payment record (payment, discount, waiver or adjustment): CancelInvoice refuses these
+                       CAST(CASE WHEN EXISTS (SELECT 1 FROM Payments p3 WHERE p3.RentInvoiceId = ri.Id) THEN 1 ELSE 0 END AS BIT) AS HasPaymentRecords
                 FROM RentInvoices ri
                 INNER JOIN Tenants t ON ri.TenantId = t.TenantId
                 LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
@@ -43,7 +45,7 @@ namespace TRL_API.DAL
         // record with the balance after it, and the recorded events (cancel, reinstate, rent adjusted on lease
         // end/renewal, discount reduced, late fee reversed). Returns (invoice, payments, events); invoice is empty
         // when the id doesn't exist.
-        public async Task<(DataTable Invoice, DataTable Payments, DataTable Events)> GetInvoiceDetailsAsync(int invoiceId)
+        public async Task<(DataTable Invoice, DataTable Payments, DataTable Events, DataTable Charges)> GetInvoiceDetailsAsync(int invoiceId)
         {
             var id = new SqlParameter("@InvoiceId", invoiceId);
 
@@ -53,13 +55,18 @@ namespace TRL_API.DAL
                        ri.TotalRent, ri.Description, ri.ChargeType, COALESCE(sl.StatusName, 'Unknown') AS Status,
                        ri.LateFeeCharged, ri.LateFeeChargedAt, ri.LateFeePerDay, ri.LateFeeMaxMultiplier,
                        bal.Paid, bal.Disc AS Discount, bal.Waived AS LateFeeWaived, bal.OpenLateFee,
-                       bal.RentBalance, bal.Balance
+                       bal.RentBalance, bal.Balance,
+                       -- An extra charge can point to the invoice it relates to (e.g. a Rent Correction)
+                       ri.RelatedInvoiceId, rel.InvoiceDate AS RelatedInvoiceDate, rel.TotalRent AS RelatedAmount,
+                       rel.ChargeType AS RelatedChargeType, rsl.StatusName AS RelatedStatus
                 FROM RentInvoices ri
                 INNER JOIN Tenants t ON t.TenantId = ri.TenantId
                 LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
                 LEFT JOIN Floors f ON f.FloorId = u.FloorId
                 LEFT JOIN Buildings b ON b.BuildingId = f.BuildingId
                 LEFT JOIN StatusList sl ON sl.StatusId = ri.StatusId
+                LEFT JOIN RentInvoices rel ON rel.Id = ri.RelatedInvoiceId
+                LEFT JOIN StatusList rsl ON rsl.StatusId = rel.StatusId
                 CROSS APPLY dbo.InvoiceBalance(ri.Id, 0) bal
                 WHERE ri.Id = @InvoiceId;", new[] { id });
 
@@ -85,7 +92,16 @@ namespace TRL_API.DAL
                 WHERE a.InvoiceId = @InvoiceId
                 ORDER BY a.CreatedAt, a.Id;", new[] { new SqlParameter("@InvoiceId", invoiceId) });
 
-            return (invoice, payments, events);
+            // Extra charges that point to this invoice
+            var charges = await _dbHelper.ExecuteQueryReturnDataTableAsync(@"
+                SELECT c.Id AS InvoiceId, c.InvoiceDate, c.ChargeType, c.Description, c.TotalRent,
+                       COALESCE(sl.StatusName, 'Unknown') AS Status
+                FROM RentInvoices c
+                LEFT JOIN StatusList sl ON sl.StatusId = c.StatusId
+                WHERE c.RelatedInvoiceId = @InvoiceId
+                ORDER BY c.Id;", new[] { new SqlParameter("@InvoiceId", invoiceId) });
+
+            return (invoice, payments, events, charges);
         }
 
         // Only allowed when the invoice has no payment records at all.

@@ -205,16 +205,13 @@ namespace TRL_API.Controllers
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
 
-        // NEW — one-time extra charges (Maintenance, Late Fine, Security Deposit,
-        // etc.) for one, several, or all tenants, independent of monthly rent.
+        // One-time extra charges (Maintenance, Utility, Damage, Rent Correction, Other) for one or more tenants:
+        // a separate invoice each, independent of monthly rent. All or nothing.
         [Authorize(Roles = "Admin")]
         [HttpPost("CreateExtraCharge")]
         public async Task<IActionResult> CreateExtraCharge([FromBody] ExtraChargeRequest request)
         {
-            var response = await _service.CreateExtraChargeAsync(
-                request.TenantIds, request.Month, request.Year,
-                request.ChargeType, request.Description, request.Amount, request.DueInDays);
-
+            var response = await _service.CreateExtraChargeAsync(request);
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
 
@@ -250,17 +247,6 @@ namespace TRL_API.Controllers
         public List<int>? TenantIds { get; set; } // null/empty = all active tenants
         public int Month { get; set; }
         public int Year { get; set; }
-        public int? DueInDays { get; set; } // null = the Payment Due Days setting
-    }
-
-    public class ExtraChargeRequest
-    {
-        public List<int> TenantIds { get; set; } = new();
-        public int Month { get; set; }
-        public int Year { get; set; }
-        public string ChargeType { get; set; } = "";
-        public string Description { get; set; } = "";
-        public decimal Amount { get; set; }
         public int? DueInDays { get; set; } // null = the Payment Due Days setting
     }
 }

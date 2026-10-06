@@ -47,6 +47,12 @@ GO
 ALTER TABLE [dbo].[RefreshTokens] CHECK CONSTRAINT [FK_RefreshTokens_Users]
 GO
 
+ALTER TABLE [dbo].[RentInvoices]  WITH CHECK ADD  CONSTRAINT [FK_RentInvoices_RelatedInvoice] FOREIGN KEY([RelatedInvoiceId])
+REFERENCES [dbo].[RentInvoices] ([Id])
+GO
+ALTER TABLE [dbo].[RentInvoices] CHECK CONSTRAINT [FK_RentInvoices_RelatedInvoice]
+GO
+
 ALTER TABLE [dbo].[RentInvoices]  WITH CHECK ADD  CONSTRAINT [FK_RentInvoices_TenantLeases] FOREIGN KEY([LeaseId])
 REFERENCES [dbo].[TenantLeases] ([LeaseId])
 GO

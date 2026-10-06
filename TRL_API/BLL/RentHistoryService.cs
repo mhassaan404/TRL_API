@@ -16,7 +16,7 @@ namespace TRL_API.BLL
             return await _dal.GetHistoryAsync();
         }
 
-        public async Task<(DataTable Invoice, DataTable Payments, DataTable Events)> GetInvoiceDetailsAsync(int invoiceId) =>
+        public async Task<(DataTable Invoice, DataTable Payments, DataTable Events, DataTable Charges)> GetInvoiceDetailsAsync(int invoiceId) =>
             await _dal.GetInvoiceDetailsAsync(invoiceId);
 
         public async Task<ApiResponse> CancelInvoice(int invoiceid, string? reason, int userId)

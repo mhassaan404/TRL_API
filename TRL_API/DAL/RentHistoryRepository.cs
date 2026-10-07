@@ -18,7 +18,8 @@ namespace TRL_API.DAL
         public async Task<DataTable> GetHistoryAsync()
         {
             string query = @"
-                SELECT ri.Id AS invoiceId, ri.InvoiceDate, t.Name AS Tenant, u.UnitNumber AS Unit,
+                SELECT ri.Id AS invoiceId, ri.LeaseId, ri.InvoiceDate, ri.DueDate, t.Name AS Tenant,
+                       bd.BuildingName, f.FloorNumber, u.UnitNumber AS Unit,
                        ri.TotalRent AS MonthlyRent, ri.LateFeeCharged, ri.ChargeType,
                        bal.Paid AS PaidAmount, bal.Disc AS DiscountAmount,
                        CASE WHEN ri.StatusId = 6 THEN 0 ELSE bal.Balance END AS Balance,
@@ -26,10 +27,24 @@ namespace TRL_API.DAL
                        COALESCE(pt.Methods, 'N/A') AS PaymentMethod,
                        COALESCE(sl.StatusName, 'Unknown') AS Status,
                        -- Any payment record (payment, discount, waiver or adjustment): CancelInvoice refuses these
-                       CAST(CASE WHEN EXISTS (SELECT 1 FROM Payments p3 WHERE p3.RentInvoiceId = ri.Id) THEN 1 ELSE 0 END AS BIT) AS HasPaymentRecords
+                       CAST(CASE WHEN EXISTS (SELECT 1 FROM Payments p3 WHERE p3.RentInvoiceId = ri.Id) THEN 1 ELSE 0 END AS BIT) AS HasPaymentRecords,
+                       -- Same rules as ReinstateInvoice: the lease still covers that month, and no other rent
+                       -- invoice for that lease and month is open (UX_RentInvoices_RentPerLeaseMonth)
+                       CAST(CASE WHEN ri.StatusId = 6
+                                  AND (ri.LeaseId IS NULL OR ri.ChargeType IS NOT NULL OR rl.BilledThrough IS NULL
+                                       OR ri.InvoiceMonth < DATEFROMPARTS(YEAR(rl.BilledThrough), MONTH(rl.BilledThrough), 1)
+                                       OR rc.Amount > 0)
+                                  AND NOT (ri.LeaseId IS NOT NULL AND ri.ChargeType IS NULL AND EXISTS (
+                                       SELECT 1 FROM RentInvoices o WHERE o.LeaseId = ri.LeaseId AND o.InvoiceMonth = ri.InvoiceMonth
+                                         AND o.ChargeType IS NULL AND o.StatusId <> 6 AND o.Id <> ri.Id))
+                            THEN 1 ELSE 0 END AS BIT) AS CanReinstate
                 FROM RentInvoices ri
                 INNER JOIN Tenants t ON ri.TenantId = t.TenantId
                 LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
+                LEFT JOIN Floors f ON u.FloorId = f.FloorId
+                LEFT JOIN Buildings bd ON f.BuildingId = bd.BuildingId
+                LEFT JOIN TenantLeases rl ON rl.LeaseId = ri.LeaseId
+                OUTER APPLY (SELECT Amount FROM dbo.LeaseMonthCharge(ri.LeaseId, ri.InvoiceMonth)) rc
                 LEFT JOIN StatusList sl ON ri.StatusId = sl.StatusId
                 CROSS APPLY dbo.InvoiceBalance(ri.Id, 0) bal
                 OUTER APPLY (

@@ -446,6 +446,7 @@ namespace TRL_API.DAL
             string query = @"
                 SELECT
                     ri.Id AS InvoiceId,
+                    ri.LeaseId,
                     t.TenantId,
                     t.Name AS TenantName,
                     bd.BuildingName,
@@ -708,12 +709,14 @@ namespace TRL_API.DAL
         {
             string query = @"
                 SELECT p.Id AS PaymentId, p.RentInvoiceId AS InvoiceId, t.TenantId, t.Name AS TenantName,
-                       u.UnitNumber, ri.ChargeType, ri.InvoiceDate, p.PaymentDate, p.PaymentAmount,
+                       bd.BuildingName, f.FloorNumber, u.UnitNumber, ri.ChargeType, ri.InvoiceDate, p.PaymentDate, p.PaymentAmount,
                        p.DiscountAmount, p.PaymentMethod, p.Notes, p.IsLateFeeWaived, p.CreatedAt
                 FROM Payments p
                 INNER JOIN RentInvoices ri ON ri.Id = p.RentInvoiceId
                 INNER JOIN Tenants t ON t.TenantId = p.TenantId
                 LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
+                LEFT JOIN Floors f ON u.FloorId = f.FloorId
+                LEFT JOIN Buildings bd ON f.BuildingId = bd.BuildingId
                 WHERE (@From IS NULL OR p.PaymentDate >= @From)
                   AND (@To IS NULL OR p.PaymentDate < DATEADD(DAY, 1, @To))
                 ORDER BY p.PaymentDate DESC, p.Id DESC;";

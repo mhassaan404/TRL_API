@@ -19,12 +19,40 @@ GO
 ALTER TABLE [dbo].[Floors] CHECK CONSTRAINT [FK_Floors_Buildings]
 GO
 
-ALTER TABLE [dbo].[MaintenanceRequests]  WITH CHECK ADD  CONSTRAINT [FK__Maintenan__Tenan__1FCDBCEB] FOREIGN KEY([TenantId])
-REFERENCES [dbo].[Tenants] ([TenantId])
-ON UPDATE CASCADE
-ON DELETE CASCADE
+ALTER TABLE [dbo].[MaintenanceJobs]  WITH CHECK ADD  CONSTRAINT [FK_MaintenanceJobs_Building] FOREIGN KEY([BuildingId])
+REFERENCES [dbo].[Buildings] ([BuildingId])
 GO
-ALTER TABLE [dbo].[MaintenanceRequests] CHECK CONSTRAINT [FK__Maintenan__Tenan__1FCDBCEB]
+ALTER TABLE [dbo].[MaintenanceJobs] CHECK CONSTRAINT [FK_MaintenanceJobs_Building]
+GO
+
+ALTER TABLE [dbo].[MaintenanceJobs]  WITH CHECK ADD  CONSTRAINT [FK_MaintenanceJobs_ChargeInvoice] FOREIGN KEY([ChargeInvoiceId])
+REFERENCES [dbo].[RentInvoices] ([Id])
+GO
+ALTER TABLE [dbo].[MaintenanceJobs] CHECK CONSTRAINT [FK_MaintenanceJobs_ChargeInvoice]
+GO
+
+ALTER TABLE [dbo].[MaintenanceJobs]  WITH CHECK ADD  CONSTRAINT [FK_MaintenanceJobs_Floor] FOREIGN KEY([FloorId])
+REFERENCES [dbo].[Floors] ([FloorId])
+GO
+ALTER TABLE [dbo].[MaintenanceJobs] CHECK CONSTRAINT [FK_MaintenanceJobs_Floor]
+GO
+
+ALTER TABLE [dbo].[MaintenanceJobs]  WITH CHECK ADD  CONSTRAINT [FK_MaintenanceJobs_Tenant] FOREIGN KEY([TenantId])
+REFERENCES [dbo].[Tenants] ([TenantId])
+GO
+ALTER TABLE [dbo].[MaintenanceJobs] CHECK CONSTRAINT [FK_MaintenanceJobs_Tenant]
+GO
+
+ALTER TABLE [dbo].[MaintenanceJobs]  WITH CHECK ADD  CONSTRAINT [FK_MaintenanceJobs_Unit] FOREIGN KEY([UnitId])
+REFERENCES [dbo].[Units] ([UnitId])
+GO
+ALTER TABLE [dbo].[MaintenanceJobs] CHECK CONSTRAINT [FK_MaintenanceJobs_Unit]
+GO
+
+ALTER TABLE [dbo].[MaintenanceLog]  WITH CHECK ADD  CONSTRAINT [FK_MaintenanceLog_Job] FOREIGN KEY([JobId])
+REFERENCES [dbo].[MaintenanceJobs] ([Id])
+GO
+ALTER TABLE [dbo].[MaintenanceLog] CHECK CONSTRAINT [FK_MaintenanceLog_Job]
 GO
 
 ALTER TABLE [dbo].[Payments]  WITH CHECK ADD  CONSTRAINT [FK__Payments__Tenant__182C9B23] FOREIGN KEY([TenantId])

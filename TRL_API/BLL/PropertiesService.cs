@@ -153,7 +153,7 @@ namespace TRL_API.BLL
             }
             catch (SqlException ex) when (ex.Number is 2601 or 2627)
             {
-                return new ApiResponse { IsSuccess = false, Message = $"This floor already has unit \"{unitNumber}\"." };
+                return new ApiResponse { IsSuccess = false, Message = $"This building already has unit \"{unitNumber}\"." };
             }
             catch (SqlException ex) when (ex.Number == 547)
             {
@@ -178,7 +178,7 @@ namespace TRL_API.BLL
             }
             catch (SqlException ex) when (ex.Number is 2601 or 2627)
             {
-                return new ApiResponse { IsSuccess = false, Message = $"This floor already has unit \"{unitNumber}\"." };
+                return new ApiResponse { IsSuccess = false, Message = $"This building already has unit \"{unitNumber}\"." };
             }
             catch (SqlException ex) when (ex.Number == 547)
             {

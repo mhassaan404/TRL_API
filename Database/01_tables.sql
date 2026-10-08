@@ -154,31 +154,95 @@ SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE TABLE [dbo].[MaintenanceRequests](
+CREATE TABLE [dbo].[MaintenanceJobs](
 	[Id] [int] IDENTITY(1,1) NOT NULL,
-	[TenantId] [int] NOT NULL,
-	[Title] [nvarchar](200) NOT NULL,
-	[Description] [nvarchar](max) NOT NULL,
+	[BuildingId] [int] NOT NULL,
+	[FloorId] [int] NULL,
+	[UnitId] [int] NULL,
+	[TenantId] [int] NULL,
+	[Title] [nvarchar](150) NOT NULL,
+	[Description] [nvarchar](1000) NULL,
+	[Category] [nvarchar](30) NOT NULL,
 	[Priority] [nvarchar](10) NOT NULL,
-	[AssignedTo] [nvarchar](100) NULL,
 	[Status] [nvarchar](20) NOT NULL,
-	[CreatedAt] [datetime] NULL,
-	[StatusId] [int] NULL,
-PRIMARY KEY CLUSTERED 
+	[AssignedTo] [nvarchar](100) NULL,
+	[ReportedDate] [date] NOT NULL,
+	[CompletedDate] [date] NULL,
+	[Cost] [decimal](18, 2) NULL,
+	[ChargeInvoiceId] [int] NULL,
+	[MarkedUnit] [bit] NOT NULL,
+	[UnitStatusBefore] [int] NULL,
+	[CreatedBy] [int] NULL,
+	[CreatedAt] [datetime] NOT NULL,
+	[UpdatedAt] [datetime] NULL,
+ CONSTRAINT [PK_MaintenanceJobs] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
-) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+) ON [PRIMARY]
 GO
-ALTER TABLE [dbo].[MaintenanceRequests] ADD  DEFAULT ('Low') FOR [Priority]
+SET ANSI_PADDING ON
 GO
-ALTER TABLE [dbo].[MaintenanceRequests] ADD  DEFAULT ('Open') FOR [Status]
+CREATE NONCLUSTERED INDEX [IX_MaintenanceJobs_Status] ON [dbo].[MaintenanceJobs]
+(
+	[Status] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
 GO
-ALTER TABLE [dbo].[MaintenanceRequests] ADD  DEFAULT (getdate()) FOR [CreatedAt]
+CREATE NONCLUSTERED INDEX [IX_MaintenanceJobs_Unit] ON [dbo].[MaintenanceJobs]
+(
+	[UnitId] ASC
+)
+WHERE ([UnitId] IS NOT NULL)
+WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
 GO
-ALTER TABLE [dbo].[MaintenanceRequests]  WITH CHECK ADD CHECK  (([Priority]='High' OR [Priority]='Medium' OR [Priority]='Low'))
+ALTER TABLE [dbo].[MaintenanceJobs] ADD  CONSTRAINT [DF_MaintenanceJobs_Priority]  DEFAULT ('Medium') FOR [Priority]
 GO
-ALTER TABLE [dbo].[MaintenanceRequests]  WITH CHECK ADD CHECK  (([Status]='Closed' OR [Status]='In Progress' OR [Status]='Open'))
+ALTER TABLE [dbo].[MaintenanceJobs] ADD  CONSTRAINT [DF_MaintenanceJobs_Status]  DEFAULT ('Open') FOR [Status]
+GO
+ALTER TABLE [dbo].[MaintenanceJobs] ADD  CONSTRAINT [DF_MaintenanceJobs_MarkedUnit]  DEFAULT ((0)) FOR [MarkedUnit]
+GO
+ALTER TABLE [dbo].[MaintenanceJobs] ADD  CONSTRAINT [DF_MaintenanceJobs_CreatedAt]  DEFAULT (getdate()) FOR [CreatedAt]
+GO
+ALTER TABLE [dbo].[MaintenanceJobs]  WITH CHECK ADD  CONSTRAINT [CK_MaintenanceJobs_Category] CHECK  (([Category]='Other' OR [Category]='Cleaning' OR [Category]='Painting' OR [Category]='Carpentry' OR [Category]='AC' OR [Category]='Electrical' OR [Category]='Plumbing'))
+GO
+ALTER TABLE [dbo].[MaintenanceJobs] CHECK CONSTRAINT [CK_MaintenanceJobs_Category]
+GO
+ALTER TABLE [dbo].[MaintenanceJobs]  WITH CHECK ADD  CONSTRAINT [CK_MaintenanceJobs_Cost] CHECK  (([Cost] IS NULL OR [Cost]>=(0)))
+GO
+ALTER TABLE [dbo].[MaintenanceJobs] CHECK CONSTRAINT [CK_MaintenanceJobs_Cost]
+GO
+ALTER TABLE [dbo].[MaintenanceJobs]  WITH CHECK ADD  CONSTRAINT [CK_MaintenanceJobs_Priority] CHECK  (([Priority]='Urgent' OR [Priority]='High' OR [Priority]='Medium' OR [Priority]='Low'))
+GO
+ALTER TABLE [dbo].[MaintenanceJobs] CHECK CONSTRAINT [CK_MaintenanceJobs_Priority]
+GO
+ALTER TABLE [dbo].[MaintenanceJobs]  WITH CHECK ADD  CONSTRAINT [CK_MaintenanceJobs_Status] CHECK  (([Status]='Cancelled' OR [Status]='Completed' OR [Status]='In Progress' OR [Status]='Open'))
+GO
+ALTER TABLE [dbo].[MaintenanceJobs] CHECK CONSTRAINT [CK_MaintenanceJobs_Status]
+GO
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[MaintenanceLog](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[JobId] [int] NOT NULL,
+	[Action] [nvarchar](50) NOT NULL,
+	[Note] [nvarchar](500) NULL,
+	[UserId] [int] NULL,
+	[CreatedAt] [datetime] NOT NULL,
+ CONSTRAINT [PK_MaintenanceLog] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+CREATE NONCLUSTERED INDEX [IX_MaintenanceLog_Job] ON [dbo].[MaintenanceLog]
+(
+	[JobId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+GO
+ALTER TABLE [dbo].[MaintenanceLog] ADD  CONSTRAINT [DF_MaintenanceLog_CreatedAt]  DEFAULT (getdate()) FOR [CreatedAt]
 GO
 
 SET ANSI_NULLS ON
@@ -479,9 +543,9 @@ CREATE TABLE [dbo].[Units](
 (
 	[UnitId] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY],
- CONSTRAINT [UQ_Floor_Unit] UNIQUE NONCLUSTERED 
+ CONSTRAINT [UQ_Building_Unit] UNIQUE NONCLUSTERED 
 (
-	[FloorId] ASC,
+	[BuildingId] ASC,
 	[UnitNumber] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
 ) ON [PRIMARY]

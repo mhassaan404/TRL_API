@@ -4,18 +4,19 @@ using TRL_API.Models;
 
 namespace TRL_API.Data
 {
+    // All business data access goes through here. The database is the current request's client database
+    // (IClientContext: from the signed access token), resolved when a query runs.
     public class DbHelper
     {
-        private readonly string _connectionString;
+        private readonly IClientContext _client;
 
-        public DbHelper(IConfiguration configuration)
-        {
-            _connectionString = configuration.GetConnectionString("DefaultConnection")!;
-        }
+        public DbHelper(IClientContext client) => _client = client;
+
+        private string ConnectionString => _client.ConnectionString;
 
         public async Task<SqlConnection> GetOpenConnectionAsync()
         {
-            var conn = new SqlConnection(_connectionString);
+            var conn = new SqlConnection(ConnectionString);
             await conn.OpenAsync();
             return conn;
         }
@@ -24,7 +25,7 @@ namespace TRL_API.Data
         public async Task<DataTable> ExecuteQueryReturnDataTableAsync(string commandText,
             SqlParameter[]? parameters = null, bool isStoredProcedure = false)
         {
-            using var con = new SqlConnection(_connectionString);
+            using var con = new SqlConnection(ConnectionString);
             using var cmd = new SqlCommand(commandText, con);
 
             if (isStoredProcedure)
@@ -55,7 +56,7 @@ namespace TRL_API.Data
             {
                 if (ownConnection)
                 {
-                    conn = new SqlConnection(_connectionString);
+                    conn = new SqlConnection(ConnectionString);
                     await conn.OpenAsync();
                 }
 

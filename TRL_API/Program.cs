@@ -14,9 +14,14 @@ using TRL_API.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add DbContext
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+// Multi-client: one database per client. The catalog (ConnectionStrings:Catalog) lists the clients; each client's
+// connection string is in ClientConnections:<ConnectionKey>. The database for a request comes only from the signed
+// access token's client id (see OnTokenValidated below and Data/ClientContext.cs). AppDbContext (Users/RefreshTokens)
+// is created per client by AuthController, not registered here.
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton<IClientCatalog, ClientCatalog>();
+builder.Services.AddScoped<HttpClientContext>();
+builder.Services.AddScoped<IClientContext>(sp => sp.GetRequiredService<HttpClientContext>());
 
 // Add TokenService
 builder.Services.AddScoped<ITokenService, TokenService>();
@@ -93,6 +98,22 @@ builder.Services.AddAuthentication("JwtBearer")
                     context.Token = token;
                 }
                 return Task.CompletedTask;
+            },
+
+            // Every authenticated request re-checks the token's client: it must exist, be active, have a database
+            // configured on this server and be on the schema this API needs. The client found here (never anything
+            // from the request itself) decides which database the request uses.
+            OnTokenValidated = async context =>
+            {
+                var cid = context.Principal?.FindFirst(HttpClientContext.ClaimType)?.Value;
+                var catalog = context.HttpContext.RequestServices.GetRequiredService<IClientCatalog>();
+                var client = int.TryParse(cid, out var clientId) ? await catalog.GetByIdAsync(clientId) : null;
+                if (client == null || !client.IsActive || client.ConnectionString == null || !await catalog.IsSchemaCurrentAsync(client))
+                {
+                    context.Fail("The client for this session is not available.");
+                    return;
+                }
+                context.HttpContext.Items[HttpClientContext.ItemKey] = client;
             }
         };
     });

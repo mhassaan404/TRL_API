@@ -4,7 +4,7 @@ namespace TRL_API.Services
 {
     public interface ITokenService
     {
-        string GenerateAccessToken(User user);
+        string GenerateAccessToken(User user, int clientId);
         string GenerateRefreshToken();
     }
 }

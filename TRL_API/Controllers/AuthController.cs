@@ -16,15 +16,23 @@ namespace TRL_API.Controllers
     {
         private const string AccessCookie = "jwt";
         private const string RefreshCookie = "refreshToken";
+        private const string InvalidLogin = "Invalid client code, username or password";
+        private const string SessionExpired = "Session expired. Please log in again.";
 
-        private readonly AppDbContext _context;
+        // A real BCrypt hash no password matches: checked when the client or user doesn't exist, so the response takes
+        // as long as a wrong password and doesn't reveal which client codes or usernames exist
+        private static readonly string NoUserHash = BCrypt.Net.BCrypt.HashPassword(Guid.NewGuid().ToString("N"));
+
+        private readonly IClientCatalog _catalog;
         private readonly ITokenService _tokenService;
         private readonly JwtSettings _jwt;
         private readonly LoginThrottle _throttle;
 
-        public AuthController(AppDbContext context, ITokenService tokenService, IConfiguration configuration, LoginThrottle throttle)
+        // Users and refresh tokens are in each client's database: every action first finds the client (by the code
+        // typed at login, or by the client id in the refresh cookie), then works only in that client's database.
+        public AuthController(IClientCatalog catalog, ITokenService tokenService, IConfiguration configuration, LoginThrottle throttle)
         {
-            _context = context;
+            _catalog = catalog;
             _tokenService = tokenService;
             _jwt = configuration.GetSection("JwtSettings").Get<JwtSettings>() ?? new JwtSettings();
             _throttle = throttle;
@@ -35,24 +43,37 @@ namespace TRL_API.Controllers
         [EnableRateLimiting("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
-            if (string.IsNullOrWhiteSpace(request?.Username) || string.IsNullOrWhiteSpace(request.Password))
-                return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "Username and password are required" });
+            if (string.IsNullOrWhiteSpace(request?.ClientCode) || string.IsNullOrWhiteSpace(request.Username)
+                || string.IsNullOrWhiteSpace(request.Password))
+                return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "Client code, username and password are required" });
+
+            var clientCode = request.ClientCode.Trim();
 
             // Checked before the password, so a locked username can't keep guessing
-            var lockedMinutes = _throttle.LockedMinutesLeft(request.Username, ClientIp);
+            var lockedMinutes = _throttle.LockedMinutesLeft(clientCode, request.Username, ClientIp);
             if (lockedMinutes != null)
             {
                 var msg = $"Too many failed login attempts. Try again in {lockedMinutes} minute(s).";
                 return StatusCode(StatusCodes.Status429TooManyRequests, new ApiResponse { IsSuccess = false, Message = msg, ErrorMessage = msg });
             }
 
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.Username == request.Username);
-            if (user == null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+            // Unknown or inactive client, or no database configured: same answer as a wrong password
+            var client = await _catalog.GetByCodeAsync(clientCode);
+            if (client == null || !client.IsActive || client.ConnectionString == null)
             {
-                _throttle.RecordFailure(request.Username, ClientIp);
-                return Unauthorized(new ApiResponse { IsSuccess = false, ErrorMessage = "Invalid username or password" });
+                BCrypt.Net.BCrypt.Verify(request.Password, NoUserHash);
+                _throttle.RecordFailure(clientCode, request.Username, ClientIp);
+                return Unauthorized(new ApiResponse { IsSuccess = false, ErrorMessage = InvalidLogin });
             }
-            _throttle.Reset(request.Username, ClientIp);
+
+            await using var db = AppDbContext.ForDatabase(client.ConnectionString);
+            var user = await db.Users.FirstOrDefaultAsync(u => u.Username == request.Username);
+            if (!BCrypt.Net.BCrypt.Verify(request.Password, user?.PasswordHash ?? NoUserHash) || user == null)
+            {
+                _throttle.RecordFailure(clientCode, request.Username, ClientIp);
+                return Unauthorized(new ApiResponse { IsSuccess = false, ErrorMessage = InvalidLogin });
+            }
+            _throttle.Reset(clientCode, request.Username, ClientIp);
 
             // Checked only after the password is verified, so it doesn't reveal which accounts exist
             if (user.IsActive != true)
@@ -64,58 +85,77 @@ namespace TRL_API.Controllers
             if (user.Role != "Admin")
                 return StatusCode(StatusCodes.Status403Forbidden, new ApiResponse { IsSuccess = false, Message = "This account doesn't have access to the application.", ErrorMessage = "This account doesn't have access to the application." });
 
+            // A client database that hasn't been migrated to what this API needs can't be used yet
+            if (!await _catalog.IsSchemaCurrentAsync(client))
+            {
+                const string msg = "This company's database needs an update before it can be used. Please contact support.";
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new ApiResponse { IsSuccess = false, Message = msg, ErrorMessage = msg });
+            }
+
             var refreshToken = _tokenService.GenerateRefreshToken();
-            _context.RefreshTokens.Add(new RefreshToken
+            db.RefreshTokens.Add(new RefreshToken
             {
                 Token = Hash(refreshToken),
                 Expires = DateTime.UtcNow.AddDays(_jwt.RefreshTokenExpirationDays),
                 UserId = user.UserId,
                 CreatedAt = DateTime.UtcNow
             });
-            await _context.SaveChangesAsync();
+            await db.SaveChangesAsync();
 
-            SetAuthCookies(_tokenService.GenerateAccessToken(user), refreshToken);
-            return Ok(new ApiResponse { IsSuccess = true, Message = "Login successful" });
+            SetAuthCookies(_tokenService.GenerateAccessToken(user, client.ClientId), RefreshCookieValue(client.ClientId, refreshToken));
+            // Non-secret details for the screen (the tokens stay in HttpOnly cookies)
+            return Ok(new
+            {
+                isSuccess = true,
+                message = "Login successful",
+                user = new { username = user.Username, role = user.Role, clientCode = client.ClientCode, clientName = client.ClientName },
+            });
         }
 
         [HttpPost("refresh")]
         public async Task<IActionResult> Refresh()
         {
-            var refreshToken = Request.Cookies[RefreshCookie];
-            if (string.IsNullOrEmpty(refreshToken))
-                return Unauthorized(new ApiResponse { IsSuccess = false, ErrorMessage = "Session expired. Please log in again." });
+            // The cookie says which client the token belongs to; the token itself is then looked up (as a hash) only in
+            // that client's database, so a changed client id simply finds no token
+            var client = await ClientOfRefreshCookie();
+            if (client.Client == null || !client.Client.IsActive || client.Client.ConnectionString == null
+                || !await _catalog.IsSchemaCurrentAsync(client.Client))
+                return ExpiredSession();
 
-            var hash = Hash(refreshToken);
-            var tokenEntity = await _context.RefreshTokens.Include(t => t.User).FirstOrDefaultAsync(t => t.Token == hash);
+            await using var db = AppDbContext.ForDatabase(client.Client.ConnectionString);
+            var hash = Hash(client.Token!);
+            var tokenEntity = await db.RefreshTokens.Include(t => t.User).FirstOrDefaultAsync(t => t.Token == hash);
             if (tokenEntity == null || tokenEntity.IsRevoked || tokenEntity.Expires < DateTime.UtcNow
                 || tokenEntity.User.Role != "Admin" || tokenEntity.User.IsActive != true)
-                return Unauthorized(new ApiResponse { IsSuccess = false, ErrorMessage = "Session expired. Please log in again." });
+                return ExpiredSession();
 
             // Remove expired tokens
-            _context.RefreshTokens.RemoveRange(_context.RefreshTokens.Where(t => t.Expires < DateTime.UtcNow));
+            db.RefreshTokens.RemoveRange(db.RefreshTokens.Where(t => t.Expires < DateTime.UtcNow));
 
-            // Rotate: the presented token stops working and a new one is issued
+            // Rotate: the presented token stops working and a new one is issued (same client)
             var newRefreshToken = _tokenService.GenerateRefreshToken();
             tokenEntity.Token = Hash(newRefreshToken);
             tokenEntity.Expires = DateTime.UtcNow.AddDays(_jwt.RefreshTokenExpirationDays);
-            await _context.SaveChangesAsync();
+            await db.SaveChangesAsync();
 
-            SetAuthCookies(_tokenService.GenerateAccessToken(tokenEntity.User), newRefreshToken);
+            SetAuthCookies(_tokenService.GenerateAccessToken(tokenEntity.User, client.Client.ClientId),
+                RefreshCookieValue(client.Client.ClientId, newRefreshToken));
             return Ok(new ApiResponse { IsSuccess = true, Message = "Token refreshed successfully" });
         }
 
         [HttpPost("logout")]
         public async Task<IActionResult> Logout()
         {
-            var refreshToken = Request.Cookies[RefreshCookie];
-            if (refreshToken != null)
+            var client = await ClientOfRefreshCookie();
+            if (client.Client?.ConnectionString != null)
             {
-                var hash = Hash(refreshToken);
-                var tokenEntity = await _context.RefreshTokens.FirstOrDefaultAsync(t => t.Token == hash);
+                await using var db = AppDbContext.ForDatabase(client.Client.ConnectionString);
+                var hash = Hash(client.Token!);
+                var tokenEntity = await db.RefreshTokens.FirstOrDefaultAsync(t => t.Token == hash);
                 if (tokenEntity != null)
                 {
-                    _context.RefreshTokens.Remove(tokenEntity);
-                    await _context.SaveChangesAsync();
+                    db.RefreshTokens.Remove(tokenEntity);
+                    await db.SaveChangesAsync();
                 }
             }
 
@@ -143,10 +183,27 @@ namespace TRL_API.Controllers
 
         private string ClientIp => HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
+        // Refresh cookie = "<clientId>.<token>". The client id only says where to look; the token proves the session.
+        private static string RefreshCookieValue(int clientId, string token) => $"{clientId}.{token}";
+
+        // The client and token from the refresh cookie (Client null when missing, malformed or unknown;
+        // a cookie from before multi-client has no client id and so ends that session)
+        private async Task<(ClientInfo? Client, string? Token)> ClientOfRefreshCookie()
+        {
+            var value = Request.Cookies[RefreshCookie];
+            var dot = value?.IndexOf('.') ?? -1;
+            if (value == null || dot <= 0 || dot == value.Length - 1 || !int.TryParse(value[..dot], out var clientId))
+                return (null, null);
+            return (await _catalog.GetByIdAsync(clientId), value[(dot + 1)..]);
+        }
+
+        private UnauthorizedObjectResult ExpiredSession() =>
+            Unauthorized(new ApiResponse { IsSuccess = false, ErrorMessage = SessionExpired });
+
         // Refresh tokens are stored as SHA-256 hashes, so a copy of the database can't be used to log in
         private static string Hash(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
     }
 
     // DTOs
-    public record LoginRequest(string Username, string Password);
+    public record LoginRequest(string ClientCode, string Username, string Password);
 }

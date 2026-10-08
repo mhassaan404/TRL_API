@@ -15,7 +15,8 @@ namespace TRL_API.Services
             _jwtSettings = configuration.GetSection("JwtSettings").Get<JwtSettings>();
         }
 
-        public string GenerateAccessToken(User user)
+        // clientId: the client (database) this session belongs to; checked on every request (Program.cs)
+        public string GenerateAccessToken(User user, int clientId)
         {
             var tokenHandler = new JwtSecurityTokenHandler();
             var key = Encoding.UTF8.GetBytes(_jwtSettings.SecretKey);
@@ -24,7 +25,8 @@ namespace TRL_API.Services
             {
             new Claim(ClaimTypes.NameIdentifier, user.UserId.ToString()),
             new Claim(ClaimTypes.Name, user.Username),
-            new Claim(ClaimTypes.Role, user.Role)
+            new Claim(ClaimTypes.Role, user.Role),
+            new Claim(TRL_API.Data.HttpClientContext.ClaimType, clientId.ToString())
         };
 
             var tokenDescriptor = new SecurityTokenDescriptor

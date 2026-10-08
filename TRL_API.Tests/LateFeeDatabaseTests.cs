@@ -156,10 +156,7 @@ namespace TRL_API.Tests
         [DbFact]
         public async Task Repository_saves_and_reads_the_settings()
         {
-            var config = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:DefaultConnection"] = TestDb.ConnectionString })
-                .Build();
-            var repo = new LateFeeSettingsRepository(new DbHelper(config));
+            var repo = new LateFeeSettingsRepository(new DbHelper(new FixedClientContext(TestDb.ConnectionString!)));
             var original = await repo.GetAsync();
             var userId = await InRollback(async (con, tx) => Convert.ToInt32(await Scalar(con, tx, "SELECT TOP 1 UserId FROM Users ORDER BY UserId")));
             try

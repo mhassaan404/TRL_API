@@ -26,8 +26,9 @@ namespace TRL_API.DAL
                        bal.LastPaymentDate,
                        COALESCE(pt.Methods, 'N/A') AS PaymentMethod,
                        COALESCE(sl.StatusName, 'Unknown') AS Status,
-                       -- Any payment record (payment, discount, waiver or adjustment): CancelInvoice refuses these
-                       CAST(CASE WHEN EXISTS (SELECT 1 FROM Payments p3 WHERE p3.RentInvoiceId = ri.Id) THEN 1 ELSE 0 END AS BIT) AS HasPaymentRecords,
+                       -- Any payment record that still counts (payment, discount, waiver or adjustment, not reversed):
+                       -- CancelInvoice refuses these
+                       CAST(CASE WHEN " + InvoiceSql.HasActivePaymentRecords + @" THEN 1 ELSE 0 END AS BIT) AS HasPaymentRecords,
                        -- Same rules as ReinstateInvoice: the lease still covers that month, and no other rent
                        -- invoice for that lease and month is open (UX_RentInvoices_RentPerLeaseMonth)
                        CAST(CASE WHEN ri.StatusId = 6
@@ -85,18 +86,24 @@ namespace TRL_API.DAL
                 CROSS APPLY dbo.InvoiceBalance(ri.Id, 0) bal
                 WHERE ri.Id = @InvoiceId;", new[] { id });
 
-            // Balance after each record = rent + charged late fee - everything paid/discounted up to that record
+            // Balance after each record = rent + charged late fee - everything paid/discounted up to that record.
+            // Reversals: ReversalOfPaymentId on the reversal row; ReversedBy* on the original row (reason, who, when).
+            // ReverseBlock = why the row can't be reversed (NULL = Reverse allowed), the same rule the reversal checks.
             var payments = await _dbHelper.ExecuteQueryReturnDataTableAsync(@"
                 SELECT p.Id AS PaymentId, p.PaymentDate, p.PaymentAmount, p.DiscountAmount, p.DiscountPercent,
                        p.IsLateFeeWaived, p.PaymentMethod, p.Notes, p.CreatedAt, cu.Username AS CreatedBy,
-                       p.UpdatedAt, uu.Username AS UpdatedBy,
+                       p.UpdatedAt, uu.Username AS UpdatedBy, p.ReversalOfPaymentId,
+                       rv.Id AS ReversedByPaymentId, rv.CreatedAt AS ReversedAt, rvu.Username AS ReversedBy, rv.Notes AS ReversalReason,
                        ri.TotalRent + ri.LateFeeCharged
                          - SUM(p.PaymentAmount + p.DiscountAmount) OVER (ORDER BY p.PaymentDate, p.Id
-                                                                         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS BalanceAfter
+                                                                         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS BalanceAfter,
+                       " + InvoiceSql.ReversalBlock + @" AS ReverseBlock
                 FROM Payments p
                 INNER JOIN RentInvoices ri ON ri.Id = p.RentInvoiceId
                 LEFT JOIN Users cu ON cu.UserId = p.CreatedBy
                 LEFT JOIN Users uu ON uu.UserId = p.UpdatedBy
+                LEFT JOIN Payments rv ON rv.ReversalOfPaymentId = p.Id
+                LEFT JOIN Users rvu ON rvu.UserId = rv.CreatedBy
                 WHERE p.RentInvoiceId = @InvoiceId
                 ORDER BY p.PaymentDate, p.Id;", new[] { new SqlParameter("@InvoiceId", invoiceId) });
 
@@ -119,14 +126,19 @@ namespace TRL_API.DAL
             return (invoice, payments, events, charges);
         }
 
-        // Only allowed when the invoice has no payment records at all.
+        // Only allowed when the invoice has no payment record that still counts: none at all, or every one reversed
+        // (the records and their reversals stay). The invoice row is locked first, so a payment or reversal can't
+        // slip in between the check and the cancel.
         public async Task<DataTable> CancelInvoice(int invoiceId, string reason, int userId)
         {
             string query = @"
-                DECLARE @r VARCHAR(20);
-                IF NOT EXISTS (SELECT 1 FROM RentInvoices WHERE Id = @InvoiceId AND StatusId <> 6)
+                SET XACT_ABORT ON;
+                DECLARE @r VARCHAR(20), @Locked INT;
+                BEGIN TRAN;
+                SELECT @Locked = Id FROM RentInvoices WITH (UPDLOCK, HOLDLOCK) WHERE Id = @InvoiceId AND StatusId <> 6;
+                IF @Locked IS NULL
                     SET @r = 'NOT_FOUND';
-                ELSE IF EXISTS (SELECT 1 FROM Payments WHERE RentInvoiceId = @InvoiceId)
+                ELSE IF EXISTS (SELECT 1 FROM RentInvoices ri WHERE ri.Id = @InvoiceId AND " + InvoiceSql.HasActivePaymentRecords + @")
                     SET @r = 'HAS_PAYMENTS';
                 ELSE
                 BEGIN
@@ -135,6 +147,7 @@ namespace TRL_API.DAL
                     VALUES (@InvoiceId, 'CANCELLED', @Reason, @UserId);
                     SET @r = 'OK';
                 END
+                COMMIT;
                 SELECT @r AS Result;";
 
             return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, new[]

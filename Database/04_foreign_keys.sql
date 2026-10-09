@@ -69,6 +69,12 @@ GO
 ALTER TABLE [dbo].[Payments] CHECK CONSTRAINT [FK_Payments_RentInvoice]
 GO
 
+ALTER TABLE [dbo].[Payments]  WITH CHECK ADD  CONSTRAINT [FK_Payments_ReversalOf] FOREIGN KEY([ReversalOfPaymentId])
+REFERENCES [dbo].[Payments] ([Id])
+GO
+ALTER TABLE [dbo].[Payments] CHECK CONSTRAINT [FK_Payments_ReversalOf]
+GO
+
 ALTER TABLE [dbo].[RefreshTokens]  WITH CHECK ADD  CONSTRAINT [FK_RefreshTokens_Users] FOREIGN KEY([UserId])
 REFERENCES [dbo].[Users] ([UserId])
 GO

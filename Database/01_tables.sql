@@ -295,6 +295,7 @@ CREATE TABLE [dbo].[Payments](
 	[DiscountAmount] [decimal](18, 2) NOT NULL,
 	[DiscountPercent] [decimal](5, 2) NOT NULL,
 	[IsLateFeeWaived] [bit] NOT NULL,
+	[ReversalOfPaymentId] [int] NULL,
  CONSTRAINT [PK__Payments__3214EC075A09B4C7] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
@@ -313,6 +314,17 @@ GO
 ALTER TABLE [dbo].[Payments] ADD  CONSTRAINT [DF__Payments__Discou__2DB1C7EE]  DEFAULT ((0)) FOR [DiscountPercent]
 GO
 ALTER TABLE [dbo].[Payments] ADD  CONSTRAINT [DF__Payments__LateFe__2EA5EC27]  DEFAULT ((0)) FOR [IsLateFeeWaived]
+GO
+CREATE UNIQUE NONCLUSTERED INDEX [UX_Payments_ReversalOf] ON [dbo].[Payments]
+(
+	[ReversalOfPaymentId] ASC
+)
+WHERE ([ReversalOfPaymentId] IS NOT NULL)
+WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+GO
+ALTER TABLE [dbo].[Payments]  WITH CHECK ADD  CONSTRAINT [CK_Payments_Reversal] CHECK  (([ReversalOfPaymentId] IS NULL OR [ReversalOfPaymentId]<>[Id] AND [PaymentAmount]<=(0) AND [DiscountAmount]<=(0) AND [IsLateFeeWaived]=(0)))
+GO
+ALTER TABLE [dbo].[Payments] CHECK CONSTRAINT [CK_Payments_Reversal]
 GO
 
 SET ANSI_NULLS ON

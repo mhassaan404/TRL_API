@@ -27,15 +27,19 @@ namespace TRL_API.DAL
                     WHERE p.RentInvoiceId IN (SELECT RentInvoiceId FROM Payments WHERE Id IN ({string.Join(", ", names)}))
                 )
                 SELECT p.Id AS PaymentId, p.PaymentDate, p.PaymentAmount, p.DiscountAmount, p.IsLateFeeWaived, p.PaymentMethod,
-                       p.Notes, p.CreatedAt, cu.Username AS RecordedBy,
+                       p.Notes, p.CreatedAt, cu.Username AS RecordedBy, p.ReversalOfPaymentId,
                        t.TenantId, t.Name AS TenantName, t.TenantType, t.ContactPerson, t.Contact, t.Email, t.CnicNtn,
                        t.Address AS TenantAddress,
                        ri.Id AS InvoiceId, ri.InvoiceDate, ri.InvoiceMonth, ri.DueDate, ri.ChargeType, ri.Description,
                        ri.TotalRent, ri.LateFeeCharged, ri.LeaseId, ri.StatusId AS InvoiceStatusId,
                        COALESCE(sl.StatusName, 'Unknown') AS InvoiceStatus,
                        b.BuildingName, b.Address AS BuildingAddress, f.FloorNumber, u.UnitNumber,
-                       r.BalanceAfter, bal.Balance AS CurrentBalance
+                       r.BalanceAfter, bal.Balance AS CurrentBalance,
+                       -- A reversed payment's receipt stays printable but is marked REVERSED (entered by mistake)
+                       rv.Id AS ReversedByPaymentId, rv.CreatedAt AS ReversedAt, rvu.Username AS ReversedBy, rv.Notes AS ReversalReason
                 FROM Payments p
+                LEFT JOIN Payments rv ON rv.ReversalOfPaymentId = p.Id
+                LEFT JOIN Users rvu ON rvu.UserId = rv.CreatedBy
                 INNER JOIN RentInvoices ri ON ri.Id = p.RentInvoiceId
                 INNER JOIN Tenants t ON t.TenantId = ri.TenantId
                 LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
@@ -77,10 +81,12 @@ namespace TRL_API.DAL
                 WHERE ri.Id = @InvoiceId;",
                 new[] { new SqlParameter("@InvoiceId", invoiceId) });
 
-        // Everything recorded against the invoice, oldest first (cash, discounts, waivers and adjustments)
+        // Everything recorded against the invoice, oldest first (cash, discounts, waivers, adjustments and reversals)
         public async Task<DataTable> GetInvoicePaymentsAsync(int invoiceId) =>
             await _dbHelper.ExecuteQueryReturnDataTableAsync(@"
-                SELECT p.Id AS PaymentId, p.PaymentDate, p.PaymentAmount, p.DiscountAmount, p.IsLateFeeWaived, p.PaymentMethod
+                SELECT p.Id AS PaymentId, p.PaymentDate, p.PaymentAmount, p.DiscountAmount, p.IsLateFeeWaived, p.PaymentMethod,
+                       p.ReversalOfPaymentId,
+                       (SELECT rv.Id FROM Payments rv WHERE rv.ReversalOfPaymentId = p.Id) AS ReversedByPaymentId
                 FROM Payments p
                 WHERE p.RentInvoiceId = @InvoiceId
                 ORDER BY p.PaymentDate, p.Id;",

@@ -103,15 +103,18 @@ namespace TRL_API.Controllers
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
 
+        // Payments are never edited: a wrong one is reversed as a whole and entered again
         [Authorize(Roles = "Admin")]
-        [HttpPut("UpdatePayments")]
-        public async Task<IActionResult> UpdatePayments(List<Payments> payments)
+        [HttpPost("ReversePayment")]
+        public async Task<IActionResult> ReversePayment([FromBody] ReversePaymentRequest req)
         {
-            if (!PaymentsValid(payments))
-                return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "Invalid payment data" });
-            var response = await _service.UpdatePaymentsAsync(payments, User.GetUserId());
+            if (req == null)
+                return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "Invalid input" });
+            var response = await _service.ReversePaymentAsync(req.PaymentId, req.Reason, User.GetUserId());
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
+
+        public class ReversePaymentRequest { public int PaymentId { get; set; } public string? Reason { get; set; } }
 
         // Payments
         [Authorize(Roles = "Admin")]

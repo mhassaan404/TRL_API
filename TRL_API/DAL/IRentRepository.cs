@@ -16,10 +16,9 @@ namespace TRL_API.DAL
         Task<ApiResponse> CreatePaymentAdjustmentAsync(Payments payment, int userId, SqlConnection conn, SqlTransaction transaction);
         Task<ApiResponse> CreateRentAsync(Payments payment, int userId, SqlConnection conn, SqlTransaction transaction);
         Task<int> GetLatestPaymentIdAsync(int invoiceId, int userId, SqlConnection conn, SqlTransaction transaction);
-        Task<(decimal Current, decimal Others)?> GetPaymentEditInfoAsync(int paymentId, int invoiceId, SqlConnection conn, SqlTransaction tx);
-        Task<ApiResponse> UpdatePaymentAsync(Payments payment, int userId, SqlConnection conn, SqlTransaction transaction);
         Task<ApiResponse> RecalcInvoiceAsync(int invoiceId, SqlConnection conn, SqlTransaction transaction);
-        Task<string?> ValidatePaymentAsync(Payments p, SqlConnection conn, SqlTransaction tx, int excludePaymentId = 0);
+        Task<string?> ValidatePaymentAsync(Payments p, SqlConnection conn, SqlTransaction tx);
+        Task<DataTable> ReversePaymentAsync(int paymentId, string reason, int userId);
         Task<DataTable> ReverseLateFeeAsync(int invoiceId, string reason, int userId);
         Task<DataTable> GetOccupancyAsync();
         Task<DataTable> GetVacantUnitsAsync(int? includeUnitId);

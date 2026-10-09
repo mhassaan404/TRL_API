@@ -139,7 +139,9 @@ namespace TRL_API.DAL
                                   WHEN x.NewAmount + x.Fee - x.Cash > 0 THEN x.NewAmount + x.Fee - x.Cash
                                   ELSE 0 END AS Allowed
                       FROM Payments p JOIN @Adj x ON x.InvoiceId = p.RentInvoiceId
-                      WHERE p.DiscountAmount > 0) d;
+                      -- a reversed discount already nets to zero with its reversal row: never re-priced (keeps the pair intact)
+                      WHERE p.DiscountAmount > 0
+                        AND NOT EXISTS (SELECT 1 FROM Payments rv WHERE rv.ReversalOfPaymentId = p.Id)) d;
                 DELETE FROM @Disc WHERE NewDisc = OldDisc;
 
                 UPDATE p SET DiscountAmount = d.NewDisc, UpdatedBy = @UserId, UpdatedAt = GETDATE()

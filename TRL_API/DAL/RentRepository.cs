@@ -172,7 +172,10 @@ namespace TRL_API.DAL
                            bal.Balance AS RemainingAmount, bal.OpenLateFee AS LateFee
                     FROM RentInvoices ri
                     CROSS APPLY dbo.InvoiceBalance(ri.Id, 0) bal
-                    OUTER APPLY (SELECT MAX(DiscountPercent) AS DiscountPercent FROM Payments WHERE RentInvoiceId = ri.Id) dp
+                    -- Reversal rows and reversed rows don't count
+                    OUTER APPLY (SELECT MAX(dp1.DiscountPercent) AS DiscountPercent FROM Payments dp1
+                                 WHERE dp1.RentInvoiceId = ri.Id AND dp1.ReversalOfPaymentId IS NULL
+                                   AND NOT EXISTS (SELECT 1 FROM Payments dp2 WHERE dp2.ReversalOfPaymentId = dp1.Id)) dp
                     LEFT JOIN Tenants t ON ri.TenantId = t.TenantId
                     WHERE ri.StatusId IN (2, 3, 4, 8) AND ri.TenantId = @TenantId
                 )
@@ -288,49 +291,54 @@ namespace TRL_API.DAL
             return Convert.ToInt32(await cmd.ExecuteScalarAsync());
         }
 
-        // For an edit: the payment's current cash amount and the cash of every other payment on the invoice
-        // (null if the payment isn't on that invoice).
-        public async Task<(decimal Current, decimal Others)?> GetPaymentEditInfoAsync(int paymentId, int invoiceId, SqlConnection conn, SqlTransaction tx)
-        {
-            const string q = @"
-                SELECT p.PaymentAmount,
-                       (SELECT ISNULL(SUM(o.PaymentAmount), 0) FROM Payments o WHERE o.RentInvoiceId = p.RentInvoiceId AND o.Id <> p.Id) AS Others
-                FROM Payments p WITH (UPDLOCK)
-                WHERE p.Id = @Id AND p.RentInvoiceId = @InvoiceId;";
-            using var cmd = new SqlCommand(q, conn, tx);
-            cmd.Parameters.AddWithValue("@Id", paymentId);
-            cmd.Parameters.AddWithValue("@InvoiceId", invoiceId);
-            using var r = await cmd.ExecuteReaderAsync();
-            if (!await r.ReadAsync()) return null;
-            return (Convert.ToDecimal(r["PaymentAmount"]), Convert.ToDecimal(r["Others"]));
-        }
-
-        // Edits an existing payment in place. The payment must already belong to the given invoice and tenant.
-        public async Task<ApiResponse> UpdatePaymentAsync(Payments payment, int userId, SqlConnection conn, SqlTransaction transaction)
+        // Reverses one payment row as a whole: inserts a linked row with the same cash and discount as negatives (its
+        // waiver stops counting in dbo.InvoiceBalance) and recalculates the invoice. The original row is not changed.
+        // The invoice row is locked first (same order as payments, so they can't interleave), then every rule in
+        // InvoiceSql.ReversalBlock is re-checked; UX_Payments_ReversalOf is the last guard against a double reversal.
+        // Result: 'OK' (+ ReversalId, InvoiceId, Balance, Status) or a reason code from ReversalBlock / NOT_FOUND.
+        public async Task<DataTable> ReversePaymentAsync(int paymentId, string reason, int userId)
         {
             string query = @"
-                UPDATE Payments SET
-                    PaymentAmount = @PaymentAmount, PaymentDate = @PaymentDate, PaymentMethod = @PaymentMethod,
-                    Notes = @Notes, DiscountAmount = @DiscountAmount, DiscountPercent = @DiscountPercent,
-                    IsLateFeeWaived = @IsLateFeeWaived, UpdatedBy = @UpdatedBy, UpdatedAt = GETDATE()
-                WHERE Id = @Id AND RentInvoiceId = @RentInvoiceId AND TenantId = @TenantId;";
+                SET XACT_ABORT ON;
+                DECLARE @InvoiceId INT, @Locked INT, @Block VARCHAR(20), @NewId INT;
+                BEGIN TRAN;
+                SELECT @InvoiceId = RentInvoiceId FROM Payments WHERE Id = @PaymentId;
+                IF @InvoiceId IS NULL
+                BEGIN ROLLBACK; SELECT 'NOT_FOUND' AS Result, CAST(NULL AS INT) AS ReversalId, CAST(NULL AS INT) AS InvoiceId,
+                                       CAST(NULL AS DECIMAL(18,2)) AS Balance, CAST(NULL AS VARCHAR(50)) AS Status; RETURN; END
 
-            var parameters = new[]
+                SELECT @Locked = Id FROM RentInvoices WITH (UPDLOCK, HOLDLOCK) WHERE Id = @InvoiceId;
+
+                SELECT @Block = " + InvoiceSql.ReversalBlock + @"
+                FROM Payments p WITH (UPDLOCK, HOLDLOCK)
+                INNER JOIN RentInvoices ri ON ri.Id = p.RentInvoiceId
+                WHERE p.Id = @PaymentId;
+                IF @Block IS NOT NULL
+                BEGIN ROLLBACK; SELECT @Block AS Result, CAST(NULL AS INT) AS ReversalId, @InvoiceId AS InvoiceId,
+                                       CAST(NULL AS DECIMAL(18,2)) AS Balance, CAST(NULL AS VARCHAR(50)) AS Status; RETURN; END
+
+                INSERT INTO Payments
+                    (TenantId, PaymentAmount, PaymentDate, RentInvoiceId, PaymentMethod, Notes,
+                     DiscountAmount, DiscountPercent, IsLateFeeWaived, CreatedBy, CreatedAt, ReversalOfPaymentId)
+                SELECT TenantId, -PaymentAmount, GETDATE(), RentInvoiceId, PaymentMethod, @Reason,
+                       -DiscountAmount, 0, 0, @UserId, GETDATE(), Id
+                FROM Payments WHERE Id = @PaymentId;
+                SET @NewId = SCOPE_IDENTITY();
+                " + RecalcInvoiceSql + @"
+                COMMIT;
+
+                SELECT 'OK' AS Result, @NewId AS ReversalId, @InvoiceId AS InvoiceId, b.Balance, s.StatusName AS Status
+                FROM RentInvoices ri
+                CROSS APPLY dbo.InvoiceBalance(ri.Id, 0) b
+                LEFT JOIN StatusList s ON s.StatusId = ri.StatusId
+                WHERE ri.Id = @InvoiceId;";
+
+            return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, new[]
             {
-                new SqlParameter("@Id", payment.Id),
-                new SqlParameter("@TenantId", payment.TenantId),
-                new SqlParameter("@RentInvoiceId", payment.RentInvoiceId),
-                new SqlParameter("@PaymentAmount", payment.PaymentAmount),
-                new SqlParameter("@PaymentDate", payment.PaymentDate),
-                new SqlParameter("@PaymentMethod", string.IsNullOrWhiteSpace(payment.PaymentMethod) ? (object)DBNull.Value : payment.PaymentMethod),
-                new SqlParameter("@Notes", string.IsNullOrWhiteSpace(payment.Notes) ? (object)DBNull.Value : payment.Notes),
-                new SqlParameter("@DiscountAmount", payment.DiscountAmount),
-                new SqlParameter("@DiscountPercent", payment.DiscountPercent),
-                new SqlParameter("@IsLateFeeWaived", payment.IsLateFeeWaived),
-                new SqlParameter("@UpdatedBy", userId),
-            };
-
-            return await _dbHelper.ExecuteQueryAsync(query, parameters, conn, transaction);
+                new SqlParameter("@PaymentId", paymentId),
+                new SqlParameter("@Reason", SqlDbType.NVarChar, 500) { Value = reason },
+                new SqlParameter("@UserId", userId),
+            });
         }
 
 
@@ -346,8 +354,7 @@ namespace TRL_API.DAL
 
 
         // Server-side payment rules (inside the same transaction as the insert)
-        // excludePaymentId: when editing a payment, leave its current amounts out of the balance so they aren't counted twice.
-        public async Task<string?> ValidatePaymentAsync(Payments p, SqlConnection conn, SqlTransaction tx, int excludePaymentId = 0)
+        public async Task<string?> ValidatePaymentAsync(Payments p, SqlConnection conn, SqlTransaction tx)
         {
             // The first statement locks the invoice row (UPDLOCK/HOLDLOCK) before anything reads it, so a second payment
             // on the same invoice waits until this transaction commits and then validates against the updated balance.
@@ -358,18 +365,17 @@ namespace TRL_API.DAL
                 DECLARE @Locked INT;
                 SELECT @Locked = Id FROM RentInvoices WITH (UPDLOCK, HOLDLOCK) WHERE Id = @Id;
                 SELECT ri.TenantId, ri.StatusId, b.Balance, b.RentBalance, b.OpenLateFee AS OpenFee,
-                    CASE WHEN @ExcludeId = 0 AND EXISTS (
+                    CASE WHEN EXISTS (
                         SELECT 1 FROM Payments p
                         WHERE p.RentInvoiceId = ri.Id AND p.PaymentAmount = @PaymentAmount
                           AND p.DiscountAmount = @DiscountAmount AND p.IsLateFeeWaived = @IsLateFeeWaived
                           AND p.CreatedAt >= DATEADD(SECOND, -10, GETDATE())) THEN 1 ELSE 0 END AS RecentDuplicate
                 FROM RentInvoices ri
-                CROSS APPLY dbo.InvoiceBalance(ri.Id, @ExcludeId) b
+                CROSS APPLY dbo.InvoiceBalance(ri.Id, 0) b
                 WHERE ri.Id = @Id;";
 
             using var cmd = new SqlCommand(q, conn, tx);
             cmd.Parameters.AddWithValue("@Id", p.RentInvoiceId);
-            cmd.Parameters.AddWithValue("@ExcludeId", excludePaymentId);
             cmd.Parameters.Add(new SqlParameter("@PaymentAmount", SqlDbType.Decimal) { Precision = 18, Scale = 2, Value = p.PaymentAmount });
             cmd.Parameters.Add(new SqlParameter("@DiscountAmount", SqlDbType.Decimal) { Precision = 18, Scale = 2, Value = p.DiscountAmount });
             cmd.Parameters.AddWithValue("@IsLateFeeWaived", p.IsLateFeeWaived);
@@ -713,8 +719,10 @@ namespace TRL_API.DAL
             string query = @"
                 SELECT p.Id AS PaymentId, p.RentInvoiceId AS InvoiceId, t.TenantId, t.Name AS TenantName,
                        bd.BuildingName, f.FloorNumber, u.UnitNumber, ri.ChargeType, ri.InvoiceDate, p.PaymentDate, p.PaymentAmount,
-                       p.DiscountAmount, p.PaymentMethod, p.Notes, p.IsLateFeeWaived, p.CreatedAt
+                       p.DiscountAmount, p.PaymentMethod, p.Notes, p.IsLateFeeWaived, p.CreatedAt,
+                       p.ReversalOfPaymentId, rv.Id AS ReversedByPaymentId, rv.CreatedAt AS ReversedAt, rv.Notes AS ReversalReason
                 FROM Payments p
+                LEFT JOIN Payments rv ON rv.ReversalOfPaymentId = p.Id
                 INNER JOIN RentInvoices ri ON ri.Id = p.RentInvoiceId
                 INNER JOIN Tenants t ON t.TenantId = p.TenantId
                 LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)

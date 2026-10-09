@@ -44,8 +44,13 @@ namespace TRL_API.DAL
                        p.Notes, us.Username AS RecordedBy,
                        t.TenantId, t.Name AS TenantName,
                        ri.Id AS InvoiceId, ri.LeaseId, ri.InvoiceMonth, ri.InvoiceDate, ri.ChargeType,
-                       bd.BuildingName, f.FloorNumber, u.UnitNumber
+                       bd.BuildingName, f.FloorNumber, u.UnitNumber,
+                       -- A reversal is listed on its own date with negative amounts; ReversesWaiver = it also takes back
+                       -- the original's late-fee waiver. ReversedByPaymentId marks an original that was reversed later.
+                       p.ReversalOfPaymentId, CAST(ISNULL(orig.IsLateFeeWaived, 0) AS BIT) AS ReversesWaiver,
+                       (SELECT rv.Id FROM Payments rv WHERE rv.ReversalOfPaymentId = p.Id) AS ReversedByPaymentId
                 FROM Payments p
+                LEFT JOIN Payments orig ON orig.Id = p.ReversalOfPaymentId
                 INNER JOIN Tenants t ON p.TenantId = t.TenantId
                 LEFT JOIN RentInvoices ri ON ri.Id = p.RentInvoiceId
                 LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
@@ -126,7 +131,9 @@ namespace TRL_API.DAL
                     UNION ALL
                     SELECT CAST(p.PaymentDate AS DATE), 3, N'Payment',
                            p.RentInvoiceId, p.Id,
-                           CASE WHEN p.RentInvoiceId IS NULL THEN N'Payment' ELSE CONCAT(N'Payment for invoice #', p.RentInvoiceId) END
+                           CASE WHEN p.ReversalOfPaymentId IS NOT NULL
+                                THEN CONCAT(N'Reversal of payment #', p.ReversalOfPaymentId, N' (invoice #', p.RentInvoiceId, N')')
+                                WHEN p.RentInvoiceId IS NULL THEN N'Payment' ELSE CONCAT(N'Payment for invoice #', p.RentInvoiceId) END
                              + CASE WHEN p.IsLateFeeWaived = 1 THEN N' (late fee waived)' ELSE N'' END,
                            ri.UnitId, ISNULL(NULLIF(LTRIM(RTRIM(p.PaymentMethod)), ''), 'Unknown'), NULL,
                            0, p.PaymentAmount
@@ -137,7 +144,9 @@ namespace TRL_API.DAL
                     UNION ALL
                     SELECT CAST(p.PaymentDate AS DATE), 4, N'Discount',
                            p.RentInvoiceId, p.Id,
-                           CASE WHEN p.RentInvoiceId IS NULL THEN N'Discount' ELSE CONCAT(N'Discount on invoice #', p.RentInvoiceId) END,
+                           CASE WHEN p.ReversalOfPaymentId IS NOT NULL
+                                THEN CONCAT(N'Reversal of discount (payment #', p.ReversalOfPaymentId, N', invoice #', p.RentInvoiceId, N')')
+                                WHEN p.RentInvoiceId IS NULL THEN N'Discount' ELSE CONCAT(N'Discount on invoice #', p.RentInvoiceId) END,
                            ri.UnitId, NULL, NULL,
                            0, p.DiscountAmount
                     FROM Payments p

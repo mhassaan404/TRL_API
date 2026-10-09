@@ -53,12 +53,14 @@ RETURN
                                                ri.LateFeePerDay, ri.LateFeeMaxMultiplier)
                      ELSE 0 END AS DECIMAL(18, 2)) AS OpenLateFee
     FROM dbo.RentInvoices ri
-    OUTER APPLY (SELECT ISNULL(SUM(PaymentAmount), 0) AS Paid,
-                        ISNULL(SUM(DiscountAmount), 0) AS Disc,
-                        ISNULL(MAX(CASE WHEN IsLateFeeWaived = 1 THEN 1 ELSE 0 END), 0) AS Waived,
-                        MAX(PaymentDate) AS LastPaymentDate
-                 FROM dbo.Payments
-                 WHERE RentInvoiceId = ri.Id AND Id <> @ExcludePaymentId) p
+    OUTER APPLY (SELECT ISNULL(SUM(x.PaymentAmount), 0) AS Paid,
+                        ISNULL(SUM(x.DiscountAmount), 0) AS Disc,
+                        ISNULL(MAX(CASE WHEN x.IsLateFeeWaived = 1 AND x.Reversed = 0 THEN 1 ELSE 0 END), 0) AS Waived,
+                        MAX(CASE WHEN x.ReversalOfPaymentId IS NULL AND x.Reversed = 0 THEN x.PaymentDate END) AS LastPaymentDate
+                 FROM (SELECT pp.PaymentAmount, pp.DiscountAmount, pp.IsLateFeeWaived, pp.PaymentDate, pp.ReversalOfPaymentId,
+                              CASE WHEN EXISTS (SELECT 1 FROM dbo.Payments r WHERE r.ReversalOfPaymentId = pp.Id) THEN 1 ELSE 0 END AS Reversed
+                       FROM dbo.Payments pp
+                       WHERE pp.RentInvoiceId = ri.Id AND pp.Id <> @ExcludePaymentId) x) p
     WHERE ri.Id = @InvoiceId;
 GO
 

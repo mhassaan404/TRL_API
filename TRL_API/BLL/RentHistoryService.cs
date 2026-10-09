@@ -27,7 +27,7 @@ namespace TRL_API.BLL
             return dt.Rows[0]["Result"].ToString() switch
             {
                 "OK" => new ApiResponse { IsSuccess = true, Message = "Invoice cancelled successfully." },
-                "HAS_PAYMENTS" => new ApiResponse { IsSuccess = false, ErrorMessage = "This invoice has payment records, so it can't be cancelled." },
+                "HAS_PAYMENTS" => new ApiResponse { IsSuccess = false, ErrorMessage = "This invoice has payment records, so it can't be cancelled. Reverse them first (Rent History → History)." },
                 _ => new ApiResponse { IsSuccess = false, ErrorMessage = "Invoice not found or already cancelled." },
             };
         }

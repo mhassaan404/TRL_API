@@ -123,54 +123,70 @@ namespace TRL_API.BLL
         public async Task<ApiResponse> CreateRentAsync(List<Payments> payments, int userId) =>
             await SubmitPaymentsAsync(payments, userId);
 
-        // Edits existing payments (matched by payment Id) and recalculates each invoice, all in one transaction.
-        public async Task<ApiResponse> UpdatePaymentsAsync(List<Payments> payments, int userId)
+        // ---------------- PAYMENT REVERSAL ----------------
+        // Payments are never edited or deleted: a row entered by mistake is reversed as a whole (cash, discount and
+        // waiver together) by a linked row, then the correct payment is recorded as a new one. A reversal means
+        // "entered by mistake", not money paid back to the tenant.
+
+        public const int ReversalReasonMaxLength = 500; // Payments.Notes
+
+        // Request checks before the database is touched (null = fine)
+        public static string? ValidateReversalRequest(int paymentId, string? reason)
         {
-            if (payments == null || payments.Count == 0)
-                return new ApiResponse { IsSuccess = false, ErrorMessage = "No payments to update." };
-            if (payments.Any(p => p.Id <= 0))
-                return new ApiResponse { IsSuccess = false, ErrorMessage = "Payment Id is required to update a payment." };
+            if (paymentId <= 0) return "Payment is required.";
+            if (string.IsNullOrWhiteSpace(reason)) return "Please enter a reason for the reversal.";
+            if (reason.Trim().Length > ReversalReasonMaxLength) return $"The reason can be at most {ReversalReasonMaxLength} characters.";
+            if (reason.Any(c => char.IsControl(c) && c != '\n' && c != '\r' && c != '\t')) return "The reason contains invalid characters.";
+            return null;
+        }
 
-            using var conn = await _dal.GetOpenConnectionAsync();
-            using var transaction = conn.BeginTransaction();
+        // Message for each reason code of InvoiceSql.ReversalBlock
+        public static string ReversalBlockMessage(string code, int paymentId) => code switch
+        {
+            "NOT_FOUND" => $"Payment #{paymentId} was not found.",
+            "IS_REVERSAL" => "This record is itself a reversal and can't be reversed.",
+            "ALREADY_REVERSED" => $"Payment #{paymentId} has already been reversed.",
+            "SETTLEMENT" => "This record belongs to a finalized move-out settlement and can't be reversed here.",
+            "ADJUSTMENT" => "Adjustments can't be reversed. Record a new adjustment instead.",
+            "NOTHING" => "This record has no amount, discount or waiver to reverse.",
+            "CANCELLED" => "The invoice is cancelled, so its payments can't be reversed.",
+            "NEGATIVE" => "An adjustment has already taken back part of this payment, so reversing it would leave a negative total. Correct it with an adjustment instead.",
+            _ => "The payment could not be reversed.",
+        };
 
-            foreach (var payment in payments)
+        public async Task<ApiResponse> ReversePaymentAsync(int paymentId, string? reason, int userId)
+        {
+            var err = ValidateReversalRequest(paymentId, reason);
+            if (err != null) return new ApiResponse { IsSuccess = false, Message = err, ErrorMessage = err };
+
+            DataTable dt;
+            try
             {
-                var info = await _dal.GetPaymentEditInfoAsync(payment.Id, payment.RentInvoiceId, conn, transaction);
-                string? err = info switch
-                {
-                    null => $"Payment #{payment.Id} was not found on invoice #{payment.RentInvoiceId}.",
-                    { Current: < 0 } => "Adjustments (reversals) can't be edited. Record a new adjustment instead.",
-                    // The edit must not leave the invoice with negative cash (e.g. below an existing reversal)
-                    { Others: var others } when others + payment.PaymentAmount < 0 =>
-                        $"This change would make the total paid on invoice #{payment.RentInvoiceId} negative.",
-                    _ => null,
-                };
-                err ??= await _dal.ValidatePaymentAsync(payment, conn, transaction, payment.Id);
-                if (err != null)
-                {
-                    transaction.Rollback();
-                    return new ApiResponse { IsSuccess = false, Message = err, ErrorMessage = err };
-                }
-
-                var updateResult = await _dal.UpdatePaymentAsync(payment, userId, conn, transaction);
-                if (!updateResult.IsSuccess)
-                {
-                    transaction.Rollback();
-                    var msg = $"Payment #{payment.Id} was not found on invoice #{payment.RentInvoiceId}.";
-                    return new ApiResponse { IsSuccess = false, Message = msg, ErrorMessage = msg };
-                }
-
-                var recalcResult = await _dal.RecalcInvoiceAsync(payment.RentInvoiceId, conn, transaction);
-                if (!recalcResult.IsSuccess)
-                {
-                    transaction.Rollback();
-                    return new ApiResponse { IsSuccess = false, Message = $"Failed to update invoice #{payment.RentInvoiceId} after payment." };
-                }
+                dt = await _dal.ReversePaymentAsync(paymentId, reason!.Trim(), userId);
+            }
+            catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number is 2601 or 2627)
+            {
+                // UX_Payments_ReversalOf: another reversal of the same row won the race
+                var msg = ReversalBlockMessage("ALREADY_REVERSED", paymentId);
+                return new ApiResponse { IsSuccess = false, Message = msg, ErrorMessage = msg };
             }
 
-            transaction.Commit();
-            return new ApiResponse { IsSuccess = true, Message = "Payment updated successfully.", RowsAffected = payments.Count };
+            var row = dt.Rows[0];
+            var result = row["Result"].ToString()!;
+            if (result != "OK")
+            {
+                var msg = ReversalBlockMessage(result, paymentId);
+                return new ApiResponse { IsSuccess = false, Message = msg, ErrorMessage = msg };
+            }
+
+            decimal balance = Convert.ToDecimal(row["Balance"]);
+            return new ApiResponse
+            {
+                IsSuccess = true,
+                Id = Convert.ToInt32(row["ReversalId"]),
+                Message = $"Payment #{paymentId} reversed. Invoice #{row["InvoiceId"]} is now {row["Status"]}"
+                          + (balance > 0 ? $" with {balance:N0} due." : "."),
+            };
         }
 
         public async Task<ApiResponse> CreatePaymentAdjustmentAsync(Payments payment, int userId)

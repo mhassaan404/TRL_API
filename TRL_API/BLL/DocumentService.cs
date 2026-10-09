@@ -38,6 +38,8 @@ namespace TRL_API.BLL
             {
                 var row = dt.AsEnumerable().FirstOrDefault(r => Convert.ToInt32(r["PaymentId"]) == id);
                 if (row == null) return (null, $"Payment #{id} was not found.");
+                if (row["ReversalOfPaymentId"] != DBNull.Value)
+                    return (null, $"Payment #{id} has no receipt: it is the reversal of payment #{row["ReversalOfPaymentId"]}.");
                 if (Convert.ToDecimal(row["PaymentAmount"]) <= 0)
                     return (null, $"Payment #{id} has no receipt: no money was received (discount, waiver or adjustment only).");
                 // Paid from the security deposit / credit moved at a move-out settlement: no new money was received

@@ -151,3 +151,93 @@ GO
 ALTER TABLE [dbo].[Units] CHECK CONSTRAINT [FK_Units_Floors]
 GO
 
+
+ALTER TABLE [dbo].[SecurityDeposits]  WITH CHECK ADD  CONSTRAINT [FK_SecurityDeposits_Lease] FOREIGN KEY([LeaseId])
+REFERENCES [dbo].[TenantLeases] ([LeaseId])
+GO
+ALTER TABLE [dbo].[SecurityDeposits] CHECK CONSTRAINT [FK_SecurityDeposits_Lease]
+GO
+
+ALTER TABLE [dbo].[SecurityDeposits]  WITH CHECK ADD  CONSTRAINT [FK_SecurityDeposits_Tenant] FOREIGN KEY([TenantId])
+REFERENCES [dbo].[Tenants] ([TenantId])
+GO
+ALTER TABLE [dbo].[SecurityDeposits] CHECK CONSTRAINT [FK_SecurityDeposits_Tenant]
+GO
+
+ALTER TABLE [dbo].[SecurityDeposits]  WITH CHECK ADD  CONSTRAINT [FK_SecurityDeposits_Unit] FOREIGN KEY([UnitId])
+REFERENCES [dbo].[Units] ([UnitId])
+GO
+ALTER TABLE [dbo].[SecurityDeposits] CHECK CONSTRAINT [FK_SecurityDeposits_Unit]
+GO
+
+ALTER TABLE [dbo].[SecurityDepositTerms]  WITH CHECK ADD  CONSTRAINT [FK_SecurityDepositTerms_Tenant] FOREIGN KEY([TenantId])
+REFERENCES [dbo].[Tenants] ([TenantId])
+GO
+ALTER TABLE [dbo].[SecurityDepositTerms] CHECK CONSTRAINT [FK_SecurityDepositTerms_Tenant]
+GO
+
+ALTER TABLE [dbo].[SecurityDepositTerms]  WITH CHECK ADD  CONSTRAINT [FK_SecurityDepositTerms_Unit] FOREIGN KEY([UnitId])
+REFERENCES [dbo].[Units] ([UnitId])
+GO
+ALTER TABLE [dbo].[SecurityDepositTerms] CHECK CONSTRAINT [FK_SecurityDepositTerms_Unit]
+GO
+
+ALTER TABLE [dbo].[MoveOutSettlements]  WITH CHECK ADD  CONSTRAINT [FK_MoveOutSettlements_Tenant] FOREIGN KEY([TenantId])
+REFERENCES [dbo].[Tenants] ([TenantId])
+GO
+ALTER TABLE [dbo].[MoveOutSettlements] CHECK CONSTRAINT [FK_MoveOutSettlements_Tenant]
+GO
+
+ALTER TABLE [dbo].[MoveOutSettlements]  WITH CHECK ADD  CONSTRAINT [FK_MoveOutSettlements_Unit] FOREIGN KEY([UnitId])
+REFERENCES [dbo].[Units] ([UnitId])
+GO
+ALTER TABLE [dbo].[MoveOutSettlements] CHECK CONSTRAINT [FK_MoveOutSettlements_Unit]
+GO
+
+ALTER TABLE [dbo].[MoveOutSettlements]  WITH CHECK ADD  CONSTRAINT [FK_MoveOutSettlements_Lease] FOREIGN KEY([LeaseId])
+REFERENCES [dbo].[TenantLeases] ([LeaseId])
+GO
+ALTER TABLE [dbo].[MoveOutSettlements] CHECK CONSTRAINT [FK_MoveOutSettlements_Lease]
+GO
+
+ALTER TABLE [dbo].[MoveOutSettlementDeductions]  WITH CHECK ADD  CONSTRAINT [FK_MoveOutSettlementDeductions_Settlement] FOREIGN KEY([SettlementId])
+REFERENCES [dbo].[MoveOutSettlements] ([Id])
+GO
+ALTER TABLE [dbo].[MoveOutSettlementDeductions] CHECK CONSTRAINT [FK_MoveOutSettlementDeductions_Settlement]
+GO
+
+ALTER TABLE [dbo].[MoveOutSettlementDeductions]  WITH CHECK ADD  CONSTRAINT [FK_MoveOutSettlementDeductions_Invoice] FOREIGN KEY([InvoiceId])
+REFERENCES [dbo].[RentInvoices] ([Id])
+GO
+ALTER TABLE [dbo].[MoveOutSettlementDeductions] CHECK CONSTRAINT [FK_MoveOutSettlementDeductions_Invoice]
+GO
+
+ALTER TABLE [dbo].[SecurityDeposits]  WITH CHECK ADD  CONSTRAINT [FK_SecurityDeposits_Settlement] FOREIGN KEY([SettlementId])
+REFERENCES [dbo].[MoveOutSettlements] ([Id])
+GO
+ALTER TABLE [dbo].[SecurityDeposits] CHECK CONSTRAINT [FK_SecurityDeposits_Settlement]
+GO
+
+ALTER TABLE [dbo].[SecurityDeposits]  WITH CHECK ADD  CONSTRAINT [FK_SecurityDeposits_Invoice] FOREIGN KEY([InvoiceId])
+REFERENCES [dbo].[RentInvoices] ([Id])
+GO
+ALTER TABLE [dbo].[SecurityDeposits] CHECK CONSTRAINT [FK_SecurityDeposits_Invoice]
+GO
+
+ALTER TABLE [dbo].[MoveOutSettlementLines]  WITH CHECK ADD  CONSTRAINT [FK_MoveOutSettlementLines_Settlement] FOREIGN KEY([SettlementId])
+REFERENCES [dbo].[MoveOutSettlements] ([Id])
+GO
+ALTER TABLE [dbo].[MoveOutSettlementLines] CHECK CONSTRAINT [FK_MoveOutSettlementLines_Settlement]
+GO
+
+ALTER TABLE [dbo].[MoveOutSettlementLines]  WITH CHECK ADD  CONSTRAINT [FK_MoveOutSettlementLines_Invoice] FOREIGN KEY([InvoiceId])
+REFERENCES [dbo].[RentInvoices] ([Id])
+GO
+ALTER TABLE [dbo].[MoveOutSettlementLines] CHECK CONSTRAINT [FK_MoveOutSettlementLines_Invoice]
+GO
+
+ALTER TABLE [dbo].[MoveOutSettlementLines]  WITH CHECK ADD  CONSTRAINT [FK_MoveOutSettlementLines_Payment] FOREIGN KEY([CashPaymentId])
+REFERENCES [dbo].[Payments] ([Id])
+GO
+ALTER TABLE [dbo].[MoveOutSettlementLines] CHECK CONSTRAINT [FK_MoveOutSettlementLines_Payment]
+GO

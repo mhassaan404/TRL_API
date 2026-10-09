@@ -58,7 +58,7 @@ namespace TRL_API.Helpers
 
         private static string? Clean(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
-        private static bool IsEmail(string email)
+        public static bool IsEmail(string email)
         {
             if (!Regex.IsMatch(email, @"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")) return false;
             try { return new MailAddress(email).Address == email; }

@@ -53,6 +53,8 @@ namespace TRL_API.DAL
                 LEFT JOIN Buildings bd ON f.BuildingId = bd.BuildingId
                 LEFT JOIN Users us ON us.UserId = p.CreatedBy
                 WHERE p.PaymentDate >= @From AND p.PaymentDate < DATEADD(DAY, 1, @To)
+                  -- Paid from the security deposit / credit moved at a move-out settlement: not money received
+                  AND ISNULL(p.PaymentMethod, N'') NOT IN (N'Security Deposit', N'Credit to Deposit')
                 ORDER BY p.PaymentDate, p.Id;",
                 new[] { new SqlParameter("@From", SqlDbType.Date) { Value = from }, new SqlParameter("@To", SqlDbType.Date) { Value = to } });
 
@@ -182,6 +184,7 @@ namespace TRL_API.DAL
                     LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
                     LEFT JOIN Floors f ON f.FloorId = u.FloorId
                     WHERE p.PaymentDate >= @From AND p.PaymentDate < DATEADD(MONTH, 1, @To)
+                      AND ISNULL(p.PaymentMethod, N'') NOT IN (N'Security Deposit', N'Credit to Deposit') -- not money received
                       AND ISNULL(ri.StatusId, 0) <> 6
                       AND (@BuildingId IS NULL OR f.BuildingId = @BuildingId)
                 )

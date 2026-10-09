@@ -174,6 +174,18 @@ app.UseExceptionHandler(errorApp =>
     errorApp.Run(async context =>
     {
         var error = context.Features.Get<IExceptionHandlerFeature>()?.Error;
+
+        // A request the server refused to read (e.g. body over the size limit) is the caller's problem, not a 500
+        if (error is Microsoft.AspNetCore.Http.BadHttpRequestException badRequest)
+        {
+            app.Logger.LogWarning("Bad request on {Method} {Path}: {Message}", context.Request.Method, context.Request.Path, badRequest.Message);
+            var tooLarge = badRequest.StatusCode == StatusCodes.Status413PayloadTooLarge;
+            var text = tooLarge ? "The request is too large." : "The request could not be read.";
+            context.Response.StatusCode = tooLarge ? StatusCodes.Status413PayloadTooLarge : StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsJsonAsync(new ApiResponse { IsSuccess = false, Message = text, ErrorMessage = text });
+            return;
+        }
+
         app.Logger.LogError(error, "Unhandled error on {Method} {Path}", context.Request.Method, context.Request.Path);
 
         const string message = "Something went wrong while processing your request. Please try again.";

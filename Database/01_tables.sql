@@ -61,6 +61,37 @@ SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
+CREATE TABLE [dbo].[CompanyProfile](
+	[Id] [int] NOT NULL,
+	[Phone] [nvarchar](30) NULL,
+	[Email] [nvarchar](100) NULL,
+	[Ntn] [nvarchar](30) NULL,
+	[Address] [nvarchar](300) NULL,
+	[Website] [nvarchar](150) NULL,
+	[FooterNote] [nvarchar](200) NULL,
+	[Logo] [varbinary](max) NULL,
+	[LogoContentType] [varchar](20) NULL,
+	[UpdatedBy] [int] NULL,
+	[UpdatedAt] [datetime] NULL,
+ CONSTRAINT [PK_CompanyProfile] PRIMARY KEY CLUSTERED
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+GO
+ALTER TABLE [dbo].[CompanyProfile]  WITH CHECK ADD  CONSTRAINT [CK_CompanyProfile_Logo] CHECK  (([Logo] IS NULL AND [LogoContentType] IS NULL OR [Logo] IS NOT NULL AND datalength([Logo])<=(204800) AND [LogoContentType] IS NOT NULL AND ([LogoContentType]='image/jpeg' OR [LogoContentType]='image/png')))
+GO
+ALTER TABLE [dbo].[CompanyProfile] CHECK CONSTRAINT [CK_CompanyProfile_Logo]
+GO
+ALTER TABLE [dbo].[CompanyProfile]  WITH CHECK ADD  CONSTRAINT [CK_CompanyProfile_SingleRow] CHECK  (([Id]=(1)))
+GO
+ALTER TABLE [dbo].[CompanyProfile] CHECK CONSTRAINT [CK_CompanyProfile_SingleRow]
+GO
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
 CREATE TABLE [dbo].[Floors](
 	[FloorId] [int] IDENTITY(1,1) NOT NULL,
 	[BuildingId] [int] NOT NULL,
@@ -426,6 +457,198 @@ CREATE TABLE [dbo].[SchemaMigrations](
 ) ON [PRIMARY]
 GO
 ALTER TABLE [dbo].[SchemaMigrations] ADD  CONSTRAINT [DF_SchemaMigrations_AppliedAt]  DEFAULT (sysutcdatetime()) FOR [AppliedAt]
+GO
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[SecurityDeposits](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[TenantId] [int] NOT NULL,
+	[UnitId] [int] NOT NULL,
+	[LeaseId] [int] NOT NULL,
+	[EntryType] [nvarchar](20) NOT NULL,
+	[Amount] [decimal](18, 2) NOT NULL,
+	[EntryDate] [date] NOT NULL,
+	[PaymentMethod] [nvarchar](30) NULL,
+	[Reference] [nvarchar](100) NULL,
+	[Notes] [nvarchar](500) NULL,
+	[CreatedBy] [int] NULL,
+	[CreatedAt] [datetime] NOT NULL,
+	[SettlementId] [int] NULL,
+	[InvoiceId] [int] NULL,
+ CONSTRAINT [PK_SecurityDeposits] PRIMARY KEY CLUSTERED
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+CREATE NONCLUSTERED INDEX [IX_SecurityDeposits_Tenancy] ON [dbo].[SecurityDeposits]
+(
+	[TenantId] ASC,
+	[UnitId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+GO
+ALTER TABLE [dbo].[SecurityDeposits] ADD  CONSTRAINT [DF_SecurityDeposits_CreatedAt]  DEFAULT (getdate()) FOR [CreatedAt]
+GO
+ALTER TABLE [dbo].[SecurityDeposits]  WITH CHECK ADD  CONSTRAINT [CK_SecurityDeposits_Amount] CHECK  ((([EntryType]='Credit Transfer' OR [EntryType]='Received') AND [Amount]>(0) AND [Amount]<=(1000000000) OR ([EntryType]='Refund' OR [EntryType]='Applied' OR [EntryType]='Correction') AND [Amount]<(0) AND [Amount]>=(-1000000000)))
+GO
+ALTER TABLE [dbo].[SecurityDeposits] CHECK CONSTRAINT [CK_SecurityDeposits_Amount]
+GO
+ALTER TABLE [dbo].[SecurityDeposits]  WITH CHECK ADD  CONSTRAINT [CK_SecurityDeposits_EntryType] CHECK  (([EntryType]='Refund' OR [EntryType]='Applied' OR [EntryType]='Credit Transfer' OR [EntryType]='Correction' OR [EntryType]='Received'))
+GO
+ALTER TABLE [dbo].[SecurityDeposits] CHECK CONSTRAINT [CK_SecurityDeposits_EntryType]
+GO
+ALTER TABLE [dbo].[SecurityDeposits]  WITH CHECK ADD  CONSTRAINT [CK_SecurityDeposits_Method] CHECK  ((NOT ([EntryType]='Refund' OR [EntryType]='Received') OR [PaymentMethod] IS NOT NULL AND ([PaymentMethod]='Online' OR [PaymentMethod]='Cheque' OR [PaymentMethod]='Bank Transfer' OR [PaymentMethod]='Cash')))
+GO
+ALTER TABLE [dbo].[SecurityDeposits] CHECK CONSTRAINT [CK_SecurityDeposits_Method]
+GO
+ALTER TABLE [dbo].[SecurityDeposits]  WITH CHECK ADD  CONSTRAINT [CK_SecurityDeposits_Reason] CHECK  (([EntryType]<>'Correction' OR [Notes] IS NOT NULL AND len([Notes])>(0)))
+GO
+ALTER TABLE [dbo].[SecurityDeposits] CHECK CONSTRAINT [CK_SecurityDeposits_Reason]
+GO
+ALTER TABLE [dbo].[SecurityDeposits]  WITH CHECK ADD  CONSTRAINT [CK_SecurityDeposits_SettlementLink] CHECK  ((([EntryType]='Correction' OR [EntryType]='Received') OR [SettlementId] IS NOT NULL AND ([EntryType]<>'Applied' OR [InvoiceId] IS NOT NULL)))
+GO
+ALTER TABLE [dbo].[SecurityDeposits] CHECK CONSTRAINT [CK_SecurityDeposits_SettlementLink]
+GO
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[SecurityDepositTerms](
+	[TenantId] [int] NOT NULL,
+	[UnitId] [int] NOT NULL,
+	[AgreedAmount] [decimal](18, 2) NOT NULL,
+	[UpdatedBy] [int] NULL,
+	[UpdatedAt] [datetime] NOT NULL,
+ CONSTRAINT [PK_SecurityDepositTerms] PRIMARY KEY CLUSTERED
+(
+	[TenantId] ASC,
+	[UnitId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+ALTER TABLE [dbo].[SecurityDepositTerms] ADD  CONSTRAINT [DF_SecurityDepositTerms_UpdatedAt]  DEFAULT (getdate()) FOR [UpdatedAt]
+GO
+ALTER TABLE [dbo].[SecurityDepositTerms]  WITH CHECK ADD  CONSTRAINT [CK_SecurityDepositTerms_Amount] CHECK  (([AgreedAmount]>(0) AND [AgreedAmount]<=(1000000000)))
+GO
+ALTER TABLE [dbo].[SecurityDepositTerms] CHECK CONSTRAINT [CK_SecurityDepositTerms_Amount]
+GO
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[MoveOutSettlements](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[TenantId] [int] NOT NULL,
+	[UnitId] [int] NOT NULL,
+	[LeaseId] [int] NOT NULL,
+	[SettlementDate] [date] NOT NULL,
+	[OutstandingBefore] [decimal](18, 2) NOT NULL,
+	[CreditBefore] [decimal](18, 2) NOT NULL,
+	[DeductionsTotal] [decimal](18, 2) NOT NULL,
+	[DepositHeldBefore] [decimal](18, 2) NOT NULL,
+	[DepositApplied] [decimal](18, 2) NOT NULL,
+	[TenantOwes] [decimal](18, 2) NOT NULL,
+	[RefundDue] [decimal](18, 2) NOT NULL,
+	[FinalPaymentReceived] [decimal](18, 2) NOT NULL,
+	[RefundPaid] [decimal](18, 2) NOT NULL,
+	[Notes] [nvarchar](500) NULL,
+	[CreatedBy] [int] NULL,
+	[CreatedAt] [datetime] NOT NULL,
+ CONSTRAINT [PK_MoveOutSettlements] PRIMARY KEY CLUSTERED
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+CREATE UNIQUE NONCLUSTERED INDEX [UX_MoveOutSettlements_Lease] ON [dbo].[MoveOutSettlements]
+(
+	[LeaseId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+GO
+ALTER TABLE [dbo].[MoveOutSettlements] ADD  CONSTRAINT [DF_MoveOutSettlements_FinalPayment]  DEFAULT ((0)) FOR [FinalPaymentReceived]
+GO
+ALTER TABLE [dbo].[MoveOutSettlements] ADD  CONSTRAINT [DF_MoveOutSettlements_RefundPaid]  DEFAULT ((0)) FOR [RefundPaid]
+GO
+ALTER TABLE [dbo].[MoveOutSettlements] ADD  CONSTRAINT [DF_MoveOutSettlements_CreatedAt]  DEFAULT (getdate()) FOR [CreatedAt]
+GO
+ALTER TABLE [dbo].[MoveOutSettlements]  WITH CHECK ADD  CONSTRAINT [CK_MoveOutSettlements_Amounts] CHECK  (([OutstandingBefore]>=(0) AND [CreditBefore]>=(0) AND [DeductionsTotal]>=(0) AND [DepositHeldBefore]>=(0) AND [DepositApplied]>=(0) AND [TenantOwes]>=(0) AND [RefundDue]>=(0) AND [FinalPaymentReceived]>=(0) AND [RefundPaid]>=(0)))
+GO
+ALTER TABLE [dbo].[MoveOutSettlements] CHECK CONSTRAINT [CK_MoveOutSettlements_Amounts]
+GO
+ALTER TABLE [dbo].[MoveOutSettlements]  WITH CHECK ADD  CONSTRAINT [CK_MoveOutSettlements_Applied] CHECK  (([DepositApplied]<=([DepositHeldBefore]+[CreditBefore])))
+GO
+ALTER TABLE [dbo].[MoveOutSettlements] CHECK CONSTRAINT [CK_MoveOutSettlements_Applied]
+GO
+ALTER TABLE [dbo].[MoveOutSettlements]  WITH CHECK ADD  CONSTRAINT [CK_MoveOutSettlements_Paid] CHECK  (([FinalPaymentReceived]<=[TenantOwes] AND [RefundPaid]<=[RefundDue]))
+GO
+ALTER TABLE [dbo].[MoveOutSettlements] CHECK CONSTRAINT [CK_MoveOutSettlements_Paid]
+GO
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[MoveOutSettlementDeductions](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[SettlementId] [int] NOT NULL,
+	[ChargeType] [nvarchar](50) NOT NULL,
+	[Amount] [decimal](18, 2) NOT NULL,
+	[Reason] [nvarchar](255) NOT NULL,
+	[InvoiceId] [int] NOT NULL,
+ CONSTRAINT [PK_MoveOutSettlementDeductions] PRIMARY KEY CLUSTERED
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+ALTER TABLE [dbo].[MoveOutSettlementDeductions]  WITH CHECK ADD  CONSTRAINT [CK_MoveOutSettlementDeductions_Amount] CHECK  (([Amount]>(0) AND [Amount]<=(1000000000)))
+GO
+ALTER TABLE [dbo].[MoveOutSettlementDeductions] CHECK CONSTRAINT [CK_MoveOutSettlementDeductions_Amount]
+GO
+ALTER TABLE [dbo].[MoveOutSettlementDeductions]  WITH CHECK ADD  CONSTRAINT [CK_MoveOutSettlementDeductions_Reason] CHECK  ((len([Reason])>(0)))
+GO
+ALTER TABLE [dbo].[MoveOutSettlementDeductions] CHECK CONSTRAINT [CK_MoveOutSettlementDeductions_Reason]
+GO
+ALTER TABLE [dbo].[MoveOutSettlementDeductions]  WITH CHECK ADD  CONSTRAINT [CK_MoveOutSettlementDeductions_Type] CHECK  (([ChargeType]='Other' OR [ChargeType]='Utility' OR [ChargeType]='Maintenance' OR [ChargeType]='Cleaning' OR [ChargeType]='Damage'))
+GO
+ALTER TABLE [dbo].[MoveOutSettlementDeductions] CHECK CONSTRAINT [CK_MoveOutSettlementDeductions_Type]
+GO
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[MoveOutSettlementLines](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[SettlementId] [int] NOT NULL,
+	[InvoiceId] [int] NOT NULL,
+	[LineType] [nvarchar](20) NOT NULL,
+	[BalanceBefore] [decimal](18, 2) NOT NULL,
+	[DepositApplied] [decimal](18, 2) NOT NULL,
+	[CashReceived] [decimal](18, 2) NOT NULL,
+	[CashPaymentId] [int] NULL,
+ CONSTRAINT [PK_MoveOutSettlementLines] PRIMARY KEY CLUSTERED
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+ALTER TABLE [dbo].[MoveOutSettlementLines] ADD  CONSTRAINT [DF_MoveOutSettlementLines_Applied]  DEFAULT ((0)) FOR [DepositApplied]
+GO
+ALTER TABLE [dbo].[MoveOutSettlementLines] ADD  CONSTRAINT [DF_MoveOutSettlementLines_Cash]  DEFAULT ((0)) FOR [CashReceived]
+GO
+ALTER TABLE [dbo].[MoveOutSettlementLines]  WITH CHECK ADD  CONSTRAINT [CK_MoveOutSettlementLines_Amounts] CHECK  (([DepositApplied]>=(0) AND [CashReceived]>=(0) AND ([LineType]='Credit' AND [BalanceBefore]<(0) AND [DepositApplied]=(0) AND [CashReceived]=(0) OR [LineType]<>'Credit' AND [BalanceBefore]>(0) AND ([DepositApplied]+[CashReceived])<=[BalanceBefore])))
+GO
+ALTER TABLE [dbo].[MoveOutSettlementLines] CHECK CONSTRAINT [CK_MoveOutSettlementLines_Amounts]
+GO
+ALTER TABLE [dbo].[MoveOutSettlementLines]  WITH CHECK ADD  CONSTRAINT [CK_MoveOutSettlementLines_Type] CHECK  (([LineType]='Deduction' OR [LineType]='Credit' OR [LineType]='Outstanding'))
+GO
+ALTER TABLE [dbo].[MoveOutSettlementLines] CHECK CONSTRAINT [CK_MoveOutSettlementLines_Type]
 GO
 
 SET ANSI_NULLS ON

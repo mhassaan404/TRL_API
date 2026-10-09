@@ -75,6 +75,7 @@ namespace TRL_API.BLL
         {
             using var conn = await _dal.GetOpenConnectionAsync();
             using var transaction = conn.BeginTransaction();
+            var receiptIds = new List<int>(); // payments with money received: each one has a printable receipt
 
             foreach (var payment in payments)
             {
@@ -91,6 +92,8 @@ namespace TRL_API.BLL
                     transaction.Rollback();
                     return new ApiResponse { IsSuccess = false, Message = $"Failed to record payment for invoice #{payment.RentInvoiceId}." };
                 }
+                if (payment.PaymentAmount > 0)
+                    receiptIds.Add(await _dal.GetLatestPaymentIdAsync(payment.RentInvoiceId, userId, conn, transaction));
 
                 var updateResult = await _dal.RecalcInvoiceAsync(payment.RentInvoiceId, conn, transaction);
                 if (!updateResult.IsSuccess)
@@ -101,7 +104,7 @@ namespace TRL_API.BLL
             }
 
             transaction.Commit();
-            return new ApiResponse { IsSuccess = true, Message = "Payment recorded successfully." };
+            return new PaymentSubmitResponse { IsSuccess = true, Message = "Payment recorded successfully.", ReceiptIds = receiptIds };
         }
 
         public async Task<DataTable> GetOccupancyAsync() => await _dal.GetOccupancyAsync();
@@ -202,14 +205,6 @@ namespace TRL_API.BLL
 
             transaction.Commit();
             return new ApiResponse { IsSuccess = true, Message = "Adjustment recorded." };
-        }
-
-        public async Task<ApiResponse> DeletePaymentAsync(int invoiceId)
-        {
-            var result = await _dal.DeleteLastPaymentForInvoice(invoiceId);
-            return result.IsSuccess
-                ? new ApiResponse { IsSuccess = true, Message = "Last payment on this invoice was deleted." }
-                : new ApiResponse { IsSuccess = false, ErrorMessage = "No payment found to delete for this invoice." };
         }
 
         public async Task<ApiResponse> BulkUpdateDueDateAsync(List<int> invoiceIds, DateTime newDueDate)

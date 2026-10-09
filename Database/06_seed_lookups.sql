@@ -41,3 +41,8 @@ GO
 INSERT INTO [dbo].[LateFeeSettings] ([Id], [PaymentDueDays], [LateFeePerDay], [MaxLateFeeMultiplier])
 SELECT 1, 5, 500, 2 WHERE NOT EXISTS (SELECT 1 FROM [dbo].[LateFeeSettings] WHERE [Id] = 1);
 GO
+
+-- Company profile (one row; filled in on the Company Profile page): empty until the admin saves it
+INSERT INTO [dbo].[CompanyProfile] ([Id])
+SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM [dbo].[CompanyProfile] WHERE [Id] = 1);
+GO

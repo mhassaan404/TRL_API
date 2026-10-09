@@ -18,8 +18,10 @@ namespace TRL_API.Services
 
         public LoginThrottle(IMemoryCache cache) => _cache = cache;
 
-        private static string Key(string clientCode, string username, string ip) =>
-            $"login-fail:{ip}:{clientCode.Trim().ToUpperInvariant()}:{username.Trim().ToLowerInvariant()}";
+        // scope keeps separate counters per action: "login" (the login page) and "password" (wrong current password on
+        // Change My Password), so a wrong current password never locks the normal login.
+        private static string Key(string clientCode, string username, string ip, string scope) =>
+            $"{scope}-fail:{ip}:{clientCode.Trim().ToUpperInvariant()}:{username.Trim().ToLowerInvariant()}";
 
         private sealed class Entry
         {
@@ -28,26 +30,27 @@ namespace TRL_API.Services
         }
 
         // Minutes left on the lock, or null when the username may try to log in from this IP
-        public int? LockedMinutesLeft(string clientCode, string username, string ip)
+        public int? LockedMinutesLeft(string clientCode, string username, string ip, string scope = "login")
         {
-            if (_cache.TryGetValue(Key(clientCode, username, ip), out Entry? e) && e!.LockedUntil > DateTime.UtcNow)
+            if (_cache.TryGetValue(Key(clientCode, username, ip, scope), out Entry? e) && e!.LockedUntil > DateTime.UtcNow)
                 return (int)Math.Ceiling((e.LockedUntil.Value - DateTime.UtcNow).TotalMinutes);
             return null;
         }
 
-        public void RecordFailure(string clientCode, string username, string ip)
+        public void RecordFailure(string clientCode, string username, string ip, string scope = "login")
         {
             lock (_gate)
             {
-                var e = _cache.Get<Entry>(Key(clientCode, username, ip)) ?? new Entry();
+                var e = _cache.Get<Entry>(Key(clientCode, username, ip, scope)) ?? new Entry();
                 e.Failures++;
                 if (e.Failures >= MaxFailures)
                     e.LockedUntil = DateTime.UtcNow.AddMinutes(LockMinutes);
                 // The count expires LockMinutes after the last failure
-                _cache.Set(Key(clientCode, username, ip), e, TimeSpan.FromMinutes(LockMinutes));
+                _cache.Set(Key(clientCode, username, ip, scope), e, TimeSpan.FromMinutes(LockMinutes));
             }
         }
 
-        public void Reset(string clientCode, string username, string ip) => _cache.Remove(Key(clientCode, username, ip));
+        public void Reset(string clientCode, string username, string ip, string scope = "login") =>
+            _cache.Remove(Key(clientCode, username, ip, scope));
     }
 }

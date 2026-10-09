@@ -1,10 +1,12 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using TRL_API.Data;
+using TRL_API.Helpers;
 using TRL_API.Models;
 using TRL_API.Services;
 
@@ -165,6 +167,70 @@ namespace TRL_API.Controllers
             return Ok(new ApiResponse { IsSuccess = true, Message = "Logged out successfully" });
         }
 
+        // Change My Password (signed-in Admin). The user comes only from the access token (user id + client id), so a
+        // user can only change their own password, in their own client's database. Wrong current passwords are
+        // throttled like logins (separate counter, so they never lock the normal login). On success every refresh
+        // token of the user is deleted, which signs out all other sessions (their access token expires within
+        // AccessTokenExpirationMinutes and can't be refreshed), and this browser gets a fresh session.
+        // Passwords are never logged or returned.
+        [HttpPost("change-password")]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request, [FromServices] IClientContext clientContext)
+        {
+            var client = clientContext.Client;
+            var userId = User.GetUserId();
+            var username = User.Identity?.Name ?? "";
+
+            var lockedMinutes = _throttle.LockedMinutesLeft(client.ClientCode, username, ClientIp, PasswordScope);
+            if (lockedMinutes != null)
+            {
+                var msg = $"Too many wrong current passwords. Try again in {lockedMinutes} minute(s).";
+                return StatusCode(StatusCodes.Status429TooManyRequests, new ApiResponse { IsSuccess = false, Message = msg, ErrorMessage = msg });
+            }
+
+            var error = PasswordPolicy.Validate(request?.CurrentPassword, request?.NewPassword, request?.ConfirmPassword, username);
+            if (error != null)
+                return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = error });
+
+            await using var db = AppDbContext.ForDatabase(client.ConnectionString!);
+            var user = await db.Users.FirstOrDefaultAsync(u => u.UserId == userId);
+            if (user == null || user.IsActive != true || user.Role != "Admin")
+                return ExpiredSession();
+
+            // 400, not 401: a wrong current password is not an expired session (the frontend would log the user out)
+            if (!BCrypt.Net.BCrypt.Verify(request!.CurrentPassword, user.PasswordHash))
+            {
+                _throttle.RecordFailure(client.ClientCode, username, ClientIp, PasswordScope);
+                return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "Your current password is incorrect." });
+            }
+            _throttle.Reset(client.ClientCode, username, ClientIp, PasswordScope);
+
+            if (BCrypt.Net.BCrypt.Verify(request.NewPassword, user.PasswordHash))
+                return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "The new password must be different from your current password." });
+
+            // Saved together: new hash, every old session removed, one new session for this browser
+            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+            db.RefreshTokens.RemoveRange(db.RefreshTokens.Where(t => t.UserId == user.UserId));
+            var refreshToken = _tokenService.GenerateRefreshToken();
+            db.RefreshTokens.Add(new RefreshToken
+            {
+                Token = Hash(refreshToken),
+                Expires = DateTime.UtcNow.AddDays(_jwt.RefreshTokenExpirationDays),
+                UserId = user.UserId,
+                CreatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+
+            SetAuthCookies(_tokenService.GenerateAccessToken(user, client.ClientId), RefreshCookieValue(client.ClientId, refreshToken));
+            return Ok(new ApiResponse
+            {
+                IsSuccess = true,
+                Message = "Your password has been changed. You stay signed in here; any other devices have been signed out.",
+            });
+        }
+
+        private const string PasswordScope = "password";
+
         // Cookie lifetimes match the tokens they carry (JwtSettings), so neither outlives the other.
         private void SetAuthCookies(string accessToken, string refreshToken)
         {
@@ -206,4 +272,5 @@ namespace TRL_API.Controllers
 
     // DTOs
     public record LoginRequest(string ClientCode, string Username, string Password);
+    public record ChangePasswordRequest(string? CurrentPassword, string? NewPassword, string? ConfirmPassword);
 }

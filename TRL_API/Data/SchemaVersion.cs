@@ -5,6 +5,6 @@ namespace TRL_API.Data
         // The newest migration (Database/migrations, file name without .sql) this API needs in a client database.
         // A client whose database hasn't recorded it in dbo.SchemaMigrations can't log in until it is migrated
         // (TRL_Tools migrate). Update this together with every new migration (a test checks it is the newest file).
-        public const string Required = "2026-10-08b_users_username_unique";
+        public const string Required = "2026-10-09c_move_out_settlement";
     }
 }

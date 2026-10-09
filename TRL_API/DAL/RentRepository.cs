@@ -276,6 +276,18 @@ namespace TRL_API.DAL
             return await _dbHelper.ExecuteQueryAsync(query, parameters, conn, transaction);
         }
 
+        // The payment just inserted by CreateRentAsync in this transaction (its Id is the receipt number). Safe: the
+        // invoice row is locked by ValidatePaymentAsync until the transaction ends, so no other payment can be added
+        // to it in between.
+        public async Task<int> GetLatestPaymentIdAsync(int invoiceId, int userId, SqlConnection conn, SqlTransaction transaction)
+        {
+            using var cmd = new SqlCommand(
+                "SELECT MAX(Id) FROM Payments WHERE RentInvoiceId = @InvoiceId AND CreatedBy = @UserId;", conn, transaction);
+            cmd.Parameters.AddWithValue("@InvoiceId", invoiceId);
+            cmd.Parameters.AddWithValue("@UserId", userId);
+            return Convert.ToInt32(await cmd.ExecuteScalarAsync());
+        }
+
         // For an edit: the payment's current cash amount and the cash of every other payment on the invoice
         // (null if the payment isn't on that invoice).
         public async Task<(decimal Current, decimal Others)?> GetPaymentEditInfoAsync(int paymentId, int invoiceId, SqlConnection conn, SqlTransaction tx)
@@ -332,15 +344,6 @@ namespace TRL_API.DAL
             return await _dbHelper.ExecuteQueryAsync(RecalcInvoiceSql, parameters, conn, transaction);
         }
 
-
-        public async Task<ApiResponse> DeleteLastPaymentForInvoice(int invoiceId)
-        {
-            string query = @"
-                DELETE FROM Payments WHERE Id = (
-                    SELECT TOP 1 Id FROM Payments WHERE RentInvoiceId = @InvoiceId 
-                    ORDER BY CreatedAt DESC, Id DESC);" + RecalcInvoiceSql;
-            return await _dbHelper.ExecuteQueryAsync(query, new[] { new SqlParameter("@InvoiceId", invoiceId) });
-        }
 
         // Server-side payment rules (inside the same transaction as the insert)
         // excludePaymentId: when editing a payment, leave its current amounts out of the balance so they aren't counted twice.

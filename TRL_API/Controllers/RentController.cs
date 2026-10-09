@@ -113,20 +113,6 @@ namespace TRL_API.Controllers
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
 
-
-        //// NEW — was missing. Same validation/flow as SubmitPayments; the frontend
-        //// calls this from the "Update" button on an existing invoice row.
-        [Authorize(Roles = "Admin")]
-        [HttpDelete("DeletePayment")]
-        public async Task<IActionResult> DeletePayment([FromQuery] int paymentId)
-        {
-            if (paymentId <= 0)
-                return Ok(new ApiResponse { IsSuccess = false, ErrorMessage = "Invoice id is required." });
-
-            var response = await _service.DeletePaymentAsync(paymentId);
-            return response.IsSuccess ? Ok(response) : BadRequest(response);
-        }
-
         // Payments
         [Authorize(Roles = "Admin")]
         [HttpPost("CreatePaymentAdjustment")]

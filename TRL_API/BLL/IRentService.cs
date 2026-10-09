@@ -21,7 +21,6 @@ namespace TRL_API.BLL
         Task<ApiResponse> CreateRentAsync(List<Payments> payments, int userId);
         Task<ApiResponse> UpdatePaymentsAsync(List<Payments> payments, int userId);
         Task<ApiResponse> CreatePaymentAdjustmentAsync(Payments payment, int userId);
-        Task<ApiResponse> DeletePaymentAsync(int invoiceId);
         Task<ApiResponse> BulkUpdateDueDateAsync(List<int> invoiceIds, DateTime newDueDate);
         Task<DataTable> GetActiveTenantsAsync();
         Task<ApiResponse> GenerateInvoicesAsync(int month, int year, int? dueInDays, List<int>? tenantIds);

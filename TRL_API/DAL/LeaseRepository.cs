@@ -16,7 +16,7 @@ namespace TRL_API.DAL
                 SELECT tl.LeaseId, tl.TenantId, t.Name AS TenantName, tl.UnitId, u.UnitNumber,
                        b.BuildingName, f.FloorNumber, tl.RentAmount, tl.StartDate, tl.EndDate,
                        tl.TenureMonths, tl.IsActive,
-                       CASE WHEN tl.IsActive = 1 AND tl.EndDate < CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END AS IsExpired,
+                       CASE WHEN tl.IsActive = 1 AND tl.EndDate < dbo.BusinessToday() THEN 1 ELSE 0 END AS IsExpired,
                        -- For the list's status only (display): how far the lease is billed, why it stopped, and
                        -- where a renewed lease's next term starts
                        tl.BilledThrough, tl.TerminationReason,
@@ -32,7 +32,7 @@ namespace TRL_API.DAL
                                   AND (n.IsActive = 1 OR n.TerminationReason = 'Renewed'))
                             THEN 1 ELSE 0 END AS BIT) AS RenewedIntoNext,
                        -- An upcoming renewal that a current lease hands over to: it can be cancelled (CancelRenewalAsync)
-                       CAST(CASE WHEN tl.IsActive = 1 AND tl.StartDate > CAST(GETDATE() AS DATE) AND EXISTS (
+                       CAST(CASE WHEN tl.IsActive = 1 AND tl.StartDate > dbo.BusinessToday() AND EXISTS (
                                 SELECT 1 FROM TenantLeases p
                                 WHERE p.TenantId = tl.TenantId AND p.UnitId = tl.UnitId AND p.IsActive = 0
                                   AND p.TerminationReason = 'Renewed' AND p.BilledThrough = DATEADD(DAY, -1, tl.StartDate))
@@ -64,23 +64,35 @@ namespace TRL_API.DAL
             return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, new[] { new SqlParameter("@TenantId", tenantId) });
         }
 
-        // Last day an ended lease on this unit is still billed, if that reaches the proposed start date
-        // (a new lease starting then would bill the same unit twice). Active leases are covered by UX_TenantLeases_ActiveUnit.
-        public async Task<DateTime?> GetOverlappingBilledThroughAsync(int unitId, DateTime startDate)
+        // Every check runs inside the transaction, after locking the unit row (a unit delete or a second lease on the
+        // same unit waits): the unit, its floor and building exist and aren't deleted; the tenant exists and isn't
+        // deleted; no ended lease on the unit is still billed on or after the start date (it would bill the unit twice);
+        // no active lease on the unit (also guarded by UX_TenantLeases_ActiveUnit).
+        // Tenants holds the tenant's current unit and rent, so the lease and the tenant row change together.
+        // Result: OK, UNIT_NOT_FOUND, TENANT_NOT_FOUND, OVERLAP (Info = billed-through date) or UNIT_LEASED.
+        public async Task<DataTable> CreateAsync(Lease lease, int userId)
         {
-            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(@"
-                SELECT MAX(BilledThrough) AS BilledThrough FROM TenantLeases
-                WHERE UnitId = @UnitId AND IsActive = 0 AND BilledThrough >= @StartDate AND BilledThrough >= StartDate;",
-                new[] { new SqlParameter("@UnitId", unitId), new SqlParameter("@StartDate", SqlDbType.Date) { Value = startDate.Date } });
-            return dt.Rows.Count > 0 && dt.Rows[0]["BilledThrough"] != DBNull.Value ? Convert.ToDateTime(dt.Rows[0]["BilledThrough"]) : null;
-        }
-
-        public async Task<ApiResponse> CreateAsync(Lease lease, int userId)
-        {
-            // Tenants holds the tenant's current unit and rent, so the lease and the tenant row change together.
             string query = @"
                 SET XACT_ABORT ON;
+                DECLARE @Locked INT, @Billed DATE;
                 BEGIN TRAN;
+                SELECT @Locked = u.UnitId
+                FROM Units u WITH (UPDLOCK, HOLDLOCK)
+                JOIN Floors f ON f.FloorId = u.FloorId
+                JOIN Buildings b ON b.BuildingId = f.BuildingId
+                WHERE u.UnitId = @UnitId AND u.IsActive = 1 AND f.IsActive = 1 AND b.IsActive = 1;
+                IF @Locked IS NULL BEGIN ROLLBACK; SELECT 'UNIT_NOT_FOUND' AS Result, CAST(NULL AS DATE) AS Info; RETURN; END
+
+                IF NOT EXISTS (SELECT 1 FROM Tenants WHERE TenantId = @TenantId AND IsDeleted = 0)
+                BEGIN ROLLBACK; SELECT 'TENANT_NOT_FOUND' AS Result, CAST(NULL AS DATE) AS Info; RETURN; END
+
+                SELECT @Billed = MAX(BilledThrough) FROM TenantLeases
+                WHERE UnitId = @UnitId AND IsActive = 0 AND BilledThrough >= @StartDate AND BilledThrough >= StartDate;
+                IF @Billed IS NOT NULL BEGIN ROLLBACK; SELECT 'OVERLAP' AS Result, @Billed AS Info; RETURN; END
+
+                IF EXISTS (SELECT 1 FROM TenantLeases WHERE UnitId = @UnitId AND IsActive = 1)
+                BEGIN ROLLBACK; SELECT 'UNIT_LEASED' AS Result, CAST(NULL AS DATE) AS Info; RETURN; END
+
                 INSERT INTO TenantLeases (TenantId, UnitId, RentAmount, StartDate, TenureMonths, IsActive, CreatedBy)
                 VALUES (@TenantId, @UnitId, @RentAmount, @StartDate, @TenureMonths, 1, @CreatedBy);
 
@@ -88,18 +100,19 @@ namespace TRL_API.DAL
                              IsActive = 1, MoveOutDate = NULL
                 FROM Tenants t JOIN Units u ON u.UnitId = @UnitId
                 WHERE t.TenantId = @TenantId;
-                COMMIT;";
+                COMMIT;
+                SELECT 'OK' AS Result, CAST(NULL AS DATE) AS Info;";
 
             var parameters = new[]
             {
                 new SqlParameter("@TenantId", lease.TenantId),
                 new SqlParameter("@UnitId", lease.UnitId),
                 new SqlParameter("@RentAmount", lease.RentAmount),
-                new SqlParameter("@StartDate", lease.StartDate),
+                new SqlParameter("@StartDate", SqlDbType.Date) { Value = lease.StartDate.Date },
                 new SqlParameter("@TenureMonths", lease.TenureMonths),
                 new SqlParameter("@CreatedBy", userId),
             };
-            return await _dbHelper.ExecuteQueryAsync(query, parameters);
+            return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters);
         }
 
         // Runs after a lease's BilledThrough moved earlier (terminate/renew), for the leases in @Affected.
@@ -177,7 +190,7 @@ namespace TRL_API.DAL
             string query = @"
                 SET XACT_ABORT ON;
                 DECLARE @TenantId INT, @UnitId INT, @OldRent DECIMAL(18,2), @OldStart DATE, @OldEnd DATE, @NewStart DATE,
-                        @Today DATE = CAST(GETDATE() AS DATE), @AdjReason NVARCHAR(300) = N'Lease renewed';
+                        @Today DATE = dbo.BusinessToday(), @AdjReason NVARCHAR(300) = N'Lease renewed';
 
                 -- Lock the lease row: a second simultaneous renew waits here, then finds the lease no longer active
                 BEGIN TRAN;
@@ -248,7 +261,7 @@ namespace TRL_API.DAL
             string query = @"
                 SET XACT_ABORT ON;
                 DECLARE @TenantId INT, @UnitId INT, @Start DATE, @PrevId INT, @PrevRent DECIMAL(18,2), @PrevEnd DATE,
-                        @Today DATE = CAST(GETDATE() AS DATE), @AdjReason NVARCHAR(300) = N'Renewal cancelled';
+                        @Today DATE = dbo.BusinessToday(), @AdjReason NVARCHAR(300) = N'Renewal cancelled';
 
                 -- Lock the renewal and the lease it replaced, like Renew/Terminate do
                 BEGIN TRAN;
@@ -263,8 +276,11 @@ namespace TRL_API.DAL
                   AND TerminationReason = 'Renewed' AND BilledThrough = DATEADD(DAY, -1, @Start);
                 IF @PrevId IS NULL BEGIN ROLLBACK; SELECT 'NOT_RENEWAL' AS Result, CAST(NULL AS DATE) AS PrevEnd; RETURN; END
 
+                -- Only records that still count: a payment that was reversed (and its reversal) no longer blocks
                 IF EXISTS (SELECT 1 FROM RentInvoices ri JOIN Payments p ON p.RentInvoiceId = ri.Id
-                           WHERE ri.LeaseId = @LeaseId AND ri.ChargeType IS NULL)
+                           WHERE ri.LeaseId = @LeaseId AND ri.ChargeType IS NULL
+                             AND p.ReversalOfPaymentId IS NULL
+                             AND NOT EXISTS (SELECT 1 FROM Payments rv WHERE rv.ReversalOfPaymentId = p.Id))
                 BEGIN ROLLBACK; SELECT 'HAS_PAYMENTS' AS Result, CAST(NULL AS DATE) AS PrevEnd; RETURN; END
 
                 -- Renewal first (one active lease per unit), billed through the day before it starts = never billed
@@ -279,7 +295,7 @@ namespace TRL_API.DAL
 
                 UPDATE Tenants SET MonthlyRent = @PrevRent WHERE TenantId = @TenantId AND UnitId = @UnitId;
 
-                -- The renewal's invoices (none can have payments) are cancelled by the usual correction
+                -- The renewal's invoices (no payment that still counts: reversed ones net to zero) are cancelled by the usual correction
                 DECLARE @Affected TABLE (LeaseId INT);
                 INSERT INTO @Affected VALUES (@LeaseId);
                 " + AdjustInvoicesAfterEndSql + @"
@@ -332,7 +348,7 @@ namespace TRL_API.DAL
         {
             string query = @"
                 SET XACT_ABORT ON;
-                DECLARE @TenantId INT, @UnitId INT, @Start DATE, @Today DATE = CAST(GETDATE() AS DATE),
+                DECLARE @TenantId INT, @UnitId INT, @Start DATE, @Today DATE = dbo.BusinessToday(),
                         @AdjReason NVARCHAR(300) = CONCAT(N'Lease ended: ', @Reason);
 
                 -- Lock the lease row: a second simultaneous terminate waits here, then finds the lease already ended
@@ -512,8 +528,11 @@ namespace TRL_API.DAL
                              AND TerminationReason = 'Renewed' AND BilledThrough = DATEADD(DAY, -1, @Start))
                 BEGIN ROLLBACK; SELECT 'RENEWAL' AS Result; RETURN; END
 
+                -- Only records that still count: a payment that was reversed (and its reversal) no longer blocks
                 IF EXISTS (SELECT 1 FROM RentInvoices ri JOIN Payments p ON p.RentInvoiceId = ri.Id
-                           WHERE ri.LeaseId = @LeaseId AND ri.ChargeType IS NULL)
+                           WHERE ri.LeaseId = @LeaseId AND ri.ChargeType IS NULL
+                             AND p.ReversalOfPaymentId IS NULL
+                             AND NOT EXISTS (SELECT 1 FROM Payments rv WHERE rv.ReversalOfPaymentId = p.Id))
                 BEGIN ROLLBACK; SELECT 'HAS_PAYMENTS' AS Result; RETURN; END
 
                 UPDATE TenantLeases
@@ -526,7 +545,7 @@ namespace TRL_API.DAL
                 IF @WasActive = 1
                 BEGIN
                     IF NOT EXISTS (SELECT 1 FROM TenantLeases WHERE TenantId = @TenantId AND IsActive = 1)
-                        UPDATE Tenants SET IsActive = 0, MoveOutDate = CAST(GETDATE() AS DATE) WHERE TenantId = @TenantId;
+                        UPDATE Tenants SET IsActive = 0, MoveOutDate = dbo.BusinessToday() WHERE TenantId = @TenantId;
                     ELSE
                         UPDATE t SET UnitId = u.UnitId, FloorId = u.FloorId, BuildingId = u.BuildingId, MonthlyRent = a.RentAmount
                         FROM Tenants t
@@ -536,7 +555,7 @@ namespace TRL_API.DAL
                         WHERE t.TenantId = @TenantId AND t.UnitId = @UnitId;
                 END
 
-                -- Its rent invoices (none can have payments) are cancelled by the usual correction
+                -- Its rent invoices (no payment that still counts: reversed ones net to zero) are cancelled by the usual correction
                 DECLARE @Affected TABLE (LeaseId INT);
                 INSERT INTO @Affected VALUES (@LeaseId);
                 " + AdjustInvoicesAfterEndSql + @"

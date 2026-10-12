@@ -160,16 +160,23 @@ namespace TRL_API.DAL
             return await _dbHelper.ExecuteQueryAsync(query, parameters);
         }
 
-        public async Task<ApiResponse> DeleteBuilding(int buildingId)
+        public async Task<string> DeleteBuilding(int buildingId)
         {
-            string query = @"UPDATE Buildings SET IsActive = 0 WHERE BuildingId = @BuildingId";
-
-            var parameters = new[]
-            {
-                new SqlParameter("@BuildingId", buildingId)
-            };
-
-            return await _dbHelper.ExecuteQueryAsync(query, parameters);
+            // Soft delete, only when nothing still uses it; the row is locked first so a lease or unit can't be added
+            // in between. Result: OK, IN_USE or NOT_FOUND (missing or already deleted).
+            string query = @"
+                SET XACT_ABORT ON;
+                DECLARE @r VARCHAR(10), @Found INT;
+                BEGIN TRAN;
+                SELECT @Found = BuildingId FROM Buildings WITH (UPDLOCK, HOLDLOCK) WHERE BuildingId = @BuildingId AND IsActive = 1;
+                IF @Found IS NULL SET @r = 'NOT_FOUND';
+                ELSE IF EXISTS (SELECT 1 FROM Floors WHERE BuildingId = @BuildingId AND IsActive = 1)
+                     OR EXISTS (SELECT 1 FROM Units WHERE BuildingId = @BuildingId AND IsActive = 1) SET @r = 'IN_USE';
+                ELSE BEGIN UPDATE Buildings SET IsActive = 0 WHERE BuildingId = @BuildingId; SET @r = 'OK'; END
+                COMMIT;
+                SELECT @r AS Result;";
+            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query, new[] { new SqlParameter("@BuildingId", buildingId) });
+            return dt.Rows[0]["Result"].ToString()!;
         }
 
         // ---------------- FLOOR ----------------
@@ -207,30 +214,44 @@ namespace TRL_API.DAL
             return await _dbHelper.ExecuteQueryAsync(query, parameters);
         }
 
-        public async Task<ApiResponse> DeleteFloor(int floorId)
+        public async Task<string> DeleteFloor(int floorId)
         {
-            string query = @"UPDATE Floors SET IsActive = 0 WHERE FloorId = @FloorId";
-
-            var parameters = new[]
-            {
-                new SqlParameter("@FloorId", floorId)
-            };
-
-            return await _dbHelper.ExecuteQueryAsync(query, parameters);
+            // Soft delete, only when nothing still uses it; the row is locked first so a lease or unit can't be added
+            // in between. Result: OK, IN_USE or NOT_FOUND (missing or already deleted).
+            string query = @"
+                SET XACT_ABORT ON;
+                DECLARE @r VARCHAR(10), @Found INT;
+                BEGIN TRAN;
+                SELECT @Found = FloorId FROM Floors WITH (UPDLOCK, HOLDLOCK) WHERE FloorId = @FloorId AND IsActive = 1;
+                IF @Found IS NULL SET @r = 'NOT_FOUND';
+                ELSE IF EXISTS (SELECT 1 FROM Units WHERE FloorId = @FloorId AND IsActive = 1) SET @r = 'IN_USE';
+                ELSE BEGIN UPDATE Floors SET IsActive = 0 WHERE FloorId = @FloorId; SET @r = 'OK'; END
+                COMMIT;
+                SELECT @r AS Result;";
+            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query, new[] { new SqlParameter("@FloorId", floorId) });
+            return dt.Rows[0]["Result"].ToString()!;
         }
 
         // ---------------- UNIT ----------------
 
-        public async Task<ApiResponse> SaveUnit(int floorId, int buildingId, string unitNumber,
-            int statusId, double baseRent, string? note, string? propertyType)
+        public async Task<bool> FloorBelongsToBuildingAsync(int floorId, int buildingId)
         {
+            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(
+                "SELECT 1 FROM Floors WHERE FloorId = @FloorId AND BuildingId = @BuildingId AND IsActive = 1",
+                new[] { new SqlParameter("@FloorId", floorId), new SqlParameter("@BuildingId", buildingId) });
+            return dt.Rows.Count > 0;
+        }
+
+        public async Task<ApiResponse> SaveUnit(int floorId, int buildingId, string unitNumber,
+            int statusId, decimal baseRent, string? note, string? propertyType)
+        {
+            // Only on an active floor of that building (checked again here in case it was deleted meanwhile)
             string query = @"INSERT INTO Units (
                 FloorId, BuildingId, UnitNumber, StatusId, BaseRent, Note, PropertyType, IsActive
             )
             OUTPUT INSERTED.UnitId
-            VALUES (
-                @FloorId, @BuildingId, @UnitNumber, @StatusId, @BaseRent, @Note, @PropertyType, 1
-            )";
+            SELECT @FloorId, @BuildingId, @UnitNumber, @StatusId, @BaseRent, @Note, @PropertyType, 1
+            WHERE EXISTS (SELECT 1 FROM Floors WHERE FloorId = @FloorId AND BuildingId = @BuildingId AND IsActive = 1)";
 
             var parameters = new[]
             {
@@ -238,7 +259,7 @@ namespace TRL_API.DAL
                 new SqlParameter("@BuildingId", buildingId),
                 new SqlParameter("@UnitNumber", unitNumber),
                 new SqlParameter("@StatusId", statusId),
-                new SqlParameter("@BaseRent", baseRent),
+                new SqlParameter("@BaseRent", SqlDbType.Decimal) { Precision = 18, Scale = 2, Value = baseRent },
                 new SqlParameter("@Note", (object?)note ?? DBNull.Value),
                 new SqlParameter("@PropertyType", (object?)propertyType ?? DBNull.Value)
             };
@@ -251,7 +272,7 @@ namespace TRL_API.DAL
         }
 
         public async Task<ApiResponse> UpdateUnit(int unitId, int floorId, int buildingId,
-            string unitNumber, int statusId, double baseRent, string? note, string? propertyType)
+            string unitNumber, int statusId, decimal baseRent, string? note, string? propertyType)
         {
             string query = @"UPDATE Units
             SET 
@@ -262,7 +283,8 @@ namespace TRL_API.DAL
                 BaseRent = @BaseRent,
                 Note = @Note,
                 PropertyType = @PropertyType
-            WHERE UnitId = @UnitId";
+            WHERE UnitId = @UnitId
+              AND EXISTS (SELECT 1 FROM Floors WHERE FloorId = @FloorId AND BuildingId = @BuildingId AND IsActive = 1)";
 
             var parameters = new[]
             {
@@ -271,7 +293,7 @@ namespace TRL_API.DAL
                 new SqlParameter("@BuildingId", buildingId),
                 new SqlParameter("@UnitNumber", unitNumber),
                 new SqlParameter("@StatusId", statusId),
-                new SqlParameter("@BaseRent", baseRent),
+                new SqlParameter("@BaseRent", SqlDbType.Decimal) { Precision = 18, Scale = 2, Value = baseRent },
                 new SqlParameter("@Note", (object?)note ?? DBNull.Value),
                 new SqlParameter("@PropertyType", (object?)propertyType ?? DBNull.Value)
             };
@@ -279,16 +301,22 @@ namespace TRL_API.DAL
             return await _dbHelper.ExecuteQueryAsync(query, parameters);
         }
 
-        public async Task<ApiResponse> DeleteUnit(int unitId)
+        public async Task<string> DeleteUnit(int unitId)
         {
-            string query = @"UPDATE Units SET IsActive = 0 WHERE UnitId = @UnitId";
-
-            var parameters = new[]
-            {
-                new SqlParameter("@UnitId", unitId)
-            };
-
-            return await _dbHelper.ExecuteQueryAsync(query, parameters);
+            // Soft delete, only when nothing still uses it; the row is locked first so a lease or unit can't be added
+            // in between. Result: OK, IN_USE or NOT_FOUND (missing or already deleted).
+            string query = @"
+                SET XACT_ABORT ON;
+                DECLARE @r VARCHAR(10), @Found INT;
+                BEGIN TRAN;
+                SELECT @Found = UnitId FROM Units WITH (UPDLOCK, HOLDLOCK) WHERE UnitId = @UnitId AND IsActive = 1;
+                IF @Found IS NULL SET @r = 'NOT_FOUND';
+                ELSE IF EXISTS (SELECT 1 FROM TenantLeases WHERE UnitId = @UnitId AND IsActive = 1) SET @r = 'IN_USE';
+                ELSE BEGIN UPDATE Units SET IsActive = 0 WHERE UnitId = @UnitId; SET @r = 'OK'; END
+                COMMIT;
+                SELECT @r AS Result;";
+            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query, new[] { new SqlParameter("@UnitId", unitId) });
+            return dt.Rows[0]["Result"].ToString()!;
         }
     }
 }

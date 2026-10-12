@@ -1,4 +1,5 @@
 using System.Data;
+using TRL_API.Helpers;
 using TRL_API.DAL;
 using TRL_API.Models;
 
@@ -21,7 +22,7 @@ namespace TRL_API.BLL
 
         public async Task<ApiResponse> RecordAsync(RecordDepositRequest r, int userId)
         {
-            var error = ValidateRecord(r, DateTime.Today);
+            var error = ValidateRecord(r, BusinessDate.Today);
             if (error != null) return Fail(error);
 
             var (result, info) = await _dal.RecordAsync(r, userId);
@@ -42,7 +43,7 @@ namespace TRL_API.BLL
 
         public async Task<ApiResponse> CorrectAsync(CorrectDepositRequest r, int userId)
         {
-            var error = ValidateCorrection(r, DateTime.Today);
+            var error = ValidateCorrection(r, BusinessDate.Today);
             if (error != null) return Fail(error);
 
             var (result, info) = await _dal.CorrectAsync(r, userId);
@@ -133,8 +134,8 @@ namespace TRL_API.BLL
             return null;
         }
 
-        // Not in the future. One day of slack so a date entered in Pakistan (UTC+5) is never refused by a server
-        // running on UTC just after midnight.
+        // Not in the future (business date, Pakistan). One day of slack for a browser clock that is slightly ahead
+        // around midnight.
         private static string? CheckDate(DateTime? date, DateTime today, string what)
         {
             if (date == null) return $"Please enter the {what}.";

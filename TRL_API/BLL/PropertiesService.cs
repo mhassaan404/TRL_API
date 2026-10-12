@@ -60,17 +60,12 @@ namespace TRL_API.BLL
 
         public async Task<ApiResponse> DeleteBuilding(int buildingId)
         {
-            try
+            return await _dal.DeleteBuilding(buildingId) switch
             {
-                var result = await _dal.DeleteBuilding(buildingId);
-                return result.IsSuccess
-                    ? new ApiResponse { IsSuccess = true, Message = "Building deleted successfully." }
-                    : new ApiResponse { IsSuccess = false, Message = "Building not found or already deleted." };
-            }
-            catch (SqlException ex) when (ex.Number == 547)
-            {
-                return new ApiResponse { IsSuccess = false, Message = "Cannot delete building because it has floors/units referencing it." };
-            }
+                "OK" => new ApiResponse { IsSuccess = true, Message = "Building deleted successfully." },
+                "IN_USE" => new ApiResponse { IsSuccess = false, Message = "Cannot delete building because it still has floors or units. Delete those first." },
+                _ => new ApiResponse { IsSuccess = false, Message = "Building not found or already deleted." },
+            };
         }
 
         // ---------------- FLOOR ----------------
@@ -121,28 +116,27 @@ namespace TRL_API.BLL
 
         public async Task<ApiResponse> DeleteFloor(int floorId)
         {
-            try
+            return await _dal.DeleteFloor(floorId) switch
             {
-                var result = await _dal.DeleteFloor(floorId);
-                return result.IsSuccess
-                    ? new ApiResponse { IsSuccess = true, Message = "Floor deleted successfully." }
-                    : new ApiResponse { IsSuccess = false, Message = "Floor not found or already deleted." };
-            }
-            catch (SqlException ex) when (ex.Number == 547)
-            {
-                return new ApiResponse { IsSuccess = false, Message = "Cannot delete floor because it has units referencing it." };
-            }
+                "OK" => new ApiResponse { IsSuccess = true, Message = "Floor deleted successfully." },
+                "IN_USE" => new ApiResponse { IsSuccess = false, Message = "Cannot delete floor because it still has units. Delete those first." },
+                _ => new ApiResponse { IsSuccess = false, Message = "Floor not found or already deleted." },
+            };
         }
 
         // ---------------- UNIT ----------------
 
+        private const string FloorMismatch = "The selected floor doesn't belong to the selected building (or has been deleted).";
+
         public async Task<ApiResponse> SaveUnit(int floorId, int buildingId, string unitNumber,
-            int statusId, double baseRent, string? note, string? propertyType)
+            int statusId, decimal baseRent, string? note, string? propertyType)
         {
             if (LabelError(unitNumber, "Unit number") is string err)
                 return new ApiResponse { IsSuccess = false, Message = err };
             if (baseRent < 0)
                 return new ApiResponse { IsSuccess = false, Message = "Base rent can't be negative." };
+            if (!await _dal.FloorBelongsToBuildingAsync(floorId, buildingId))
+                return new ApiResponse { IsSuccess = false, Message = FloorMismatch };
             unitNumber = unitNumber.Trim();
             try
             {
@@ -162,12 +156,14 @@ namespace TRL_API.BLL
         }
 
         public async Task<ApiResponse> UpdateUnit(int unitId, int floorId, int buildingId,
-            string unitNumber, int statusId, double baseRent, string? note, string? propertyType)
+            string unitNumber, int statusId, decimal baseRent, string? note, string? propertyType)
         {
             if (LabelError(unitNumber, "Unit number") is string err)
                 return new ApiResponse { IsSuccess = false, Message = err };
             if (baseRent < 0)
                 return new ApiResponse { IsSuccess = false, Message = "Base rent can't be negative." };
+            if (!await _dal.FloorBelongsToBuildingAsync(floorId, buildingId))
+                return new ApiResponse { IsSuccess = false, Message = FloorMismatch };
             unitNumber = unitNumber.Trim();
             try
             {
@@ -188,17 +184,12 @@ namespace TRL_API.BLL
 
         public async Task<ApiResponse> DeleteUnitAsync(int unitId)
         {
-            try
+            return await _dal.DeleteUnit(unitId) switch
             {
-                var result = await _dal.DeleteUnit(unitId);
-                return result.IsSuccess
-                    ? new ApiResponse { IsSuccess = true, Message = "Unit deleted successfully." }
-                    : new ApiResponse { IsSuccess = false, Message = "Unit not found or already deleted." };
-            }
-            catch (SqlException ex) when (ex.Number == 547)
-            {
-                return new ApiResponse { IsSuccess = false, Message = "Cannot delete unit because it is referenced in another record." };
-            }
+                "OK" => new ApiResponse { IsSuccess = true, Message = "Unit deleted successfully." },
+                "IN_USE" => new ApiResponse { IsSuccess = false, Message = "Cannot delete unit because it has an active or upcoming lease. End or cancel the lease first." },
+                _ => new ApiResponse { IsSuccess = false, Message = "Unit not found or already deleted." },
+            };
         }
     }
 }

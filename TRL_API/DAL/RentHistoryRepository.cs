@@ -38,6 +38,8 @@ namespace TRL_API.DAL
                                   AND NOT (ri.LeaseId IS NOT NULL AND ri.ChargeType IS NULL AND EXISTS (
                                        SELECT 1 FROM RentInvoices o WHERE o.LeaseId = ri.LeaseId AND o.InvoiceMonth = ri.InvoiceMonth
                                          AND o.ChargeType IS NULL AND o.StatusId <> 6 AND o.Id <> ri.Id))
+                                  -- and the tenancy has no move-out settlement (ReinstateInvoice refuses that too)
+                                  AND NOT EXISTS (SELECT 1 FROM MoveOutSettlements ms WHERE ms.TenantId = ri.TenantId AND ms.UnitId = ri.UnitId)
                             THEN 1 ELSE 0 END AS BIT) AS CanReinstate
                 FROM RentInvoices ri
                 INNER JOIN Tenants t ON ri.TenantId = t.TenantId
@@ -140,6 +142,8 @@ namespace TRL_API.DAL
                     SET @r = 'NOT_FOUND';
                 ELSE IF EXISTS (SELECT 1 FROM RentInvoices ri WHERE ri.Id = @InvoiceId AND " + InvoiceSql.HasActivePaymentRecords + @")
                     SET @r = 'HAS_PAYMENTS';
+                ELSE IF EXISTS (SELECT 1 FROM MoveOutSettlementLines msl WHERE msl.InvoiceId = @InvoiceId)
+                    SET @r = 'SETTLED';
                 ELSE
                 BEGIN
                     UPDATE RentInvoices SET StatusId = 6 WHERE Id = @InvoiceId;
@@ -158,13 +162,24 @@ namespace TRL_API.DAL
             });
         }
 
-        public async Task<ApiResponse> ReinstateInvoice(int invoiceId)
+        // A lease rent invoice for a month at/after the lease's billing end can only come back if the lease still
+        // covers part of that month, and is re-priced to what it covered (so a month after move-out can't return).
+        // Never for a tenancy (tenant + unit) that has a move-out settlement: its figures are final.
+        // The invoice row is locked first and every check runs inside the transaction. The audit row records the user.
+        // Result: OK, NOT_FOUND (missing or not cancelled), SETTLED or NOT_ALLOWED.
+        public async Task<string> ReinstateInvoice(int invoiceId, int userId)
         {
-            // A lease rent invoice for a month at/after the lease's billing end can only come back if the lease still
-            // covers part of that month, and is re-priced to what it covered (so a month after move-out can't return).
             string query = @"
                 SET XACT_ABORT ON;
-                DECLARE @Ok BIT = 0, @NewAmount DECIMAL(18,2), @Descr NVARCHAR(200), @Reprice BIT = 0;
+                DECLARE @Ok BIT = 0, @NewAmount DECIMAL(18,2), @Descr NVARCHAR(200), @Reprice BIT = 0, @Locked INT;
+                BEGIN TRAN;
+                SELECT @Locked = Id FROM RentInvoices WITH (UPDLOCK, HOLDLOCK) WHERE Id = @InvoiceId AND StatusId = 6;
+                IF @Locked IS NULL BEGIN ROLLBACK; SELECT 'NOT_FOUND' AS Result; RETURN; END
+
+                IF EXISTS (SELECT 1 FROM RentInvoices ri JOIN MoveOutSettlements ms ON ms.TenantId = ri.TenantId AND ms.UnitId = ri.UnitId
+                           WHERE ri.Id = @InvoiceId)
+                BEGIN ROLLBACK; SELECT 'SETTLED' AS Result; RETURN; END
+
                 SELECT @Ok = CASE WHEN ri.LeaseId IS NULL OR ri.ChargeType IS NOT NULL OR l.BilledThrough IS NULL
                                        OR ri.InvoiceMonth < DATEFROMPARTS(YEAR(l.BilledThrough), MONTH(l.BilledThrough), 1)
                                        OR c.Amount > 0 THEN 1 ELSE 0 END,
@@ -177,23 +192,25 @@ namespace TRL_API.DAL
                 OUTER APPLY dbo.LeaseMonthCharge(ri.LeaseId, ri.InvoiceMonth) c
                 WHERE ri.Id = @InvoiceId AND ri.StatusId = 6;
 
-                IF @Ok = 0 BEGIN SELECT 'NOT_ALLOWED' AS Result; RETURN; END
+                IF @Ok = 0 BEGIN ROLLBACK; SELECT 'NOT_ALLOWED' AS Result; RETURN; END
 
-                BEGIN TRAN;
                 IF @Reprice = 1
                     UPDATE RentInvoices SET TotalRent = @NewAmount, Description = @Descr WHERE Id = @InvoiceId;
 
-                INSERT INTO InvoiceAudit(InvoiceId, Action)
-                SELECT Id, 'REINSTATED' FROM RentInvoices WHERE Id = @InvoiceId AND StatusId = 6;
+                INSERT INTO InvoiceAudit(InvoiceId, Action, CreatedBy)
+                SELECT Id, 'REINSTATED', @UserId FROM RentInvoices WHERE Id = @InvoiceId AND StatusId = 6;
 
                 " + InvoiceSql.Recalc + @"
                 WHERE ri.Id = @InvoiceId AND ri.StatusId = 6;
                 COMMIT;
                 SELECT 'OK' AS Result;";
 
-            // Explicit result: the lookup SELECT above would make a row-count based success check unreliable
-            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query, new[] { new SqlParameter("@InvoiceId", invoiceId) });
-            return new ApiResponse { IsSuccess = dt.Rows.Count > 0 && dt.Rows[0]["Result"].ToString() == "OK" };
+            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query, new[]
+            {
+                new SqlParameter("@InvoiceId", invoiceId),
+                new SqlParameter("@UserId", userId),
+            });
+            return dt.Rows[0]["Result"].ToString()!;
         }
     }
 }

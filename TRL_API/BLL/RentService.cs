@@ -70,9 +70,50 @@ namespace TRL_API.BLL
 
         // ---------------- PAYMENTS ----------------
 
+        // Methods a payment can be received by (same list as the payment screen). A row with no cash (discount or
+        // waiver only) is sent as "Adjustment". The settlement methods ("Security Deposit", "Credit to Deposit") are
+        // only written by the move-out settlement itself.
+        public static readonly string[] CashMethods = { "Cash", "Bank Transfer", "Cheque", "Online" };
+        public const string NoCashMethod = "Adjustment";
+        public const decimal MaxPaymentAmount = 1_000_000_000m; // same limit as deposits and settlements
+        public const int MaxPaymentsPerSubmit = 100;
+
+        // Field checks for new payments before the database is touched (null = fine). Balances, tenants and the
+        // overdue rule are checked against the invoice in ValidatePaymentAsync.
+        public static string? ValidatePaymentFields(List<Payments> payments, DateTime today)
+        {
+            if (payments.Count > MaxPaymentsPerSubmit) return $"At most {MaxPaymentsPerSubmit} payments can be recorded at once.";
+            // One row per invoice: the screen never sends two, and a second identical row would otherwise be refused as
+            // "just recorded" by the double-submit check, with a misleading message
+            var repeated = payments.GroupBy(p => p.RentInvoiceId).FirstOrDefault(g => g.Count() > 1);
+            if (repeated != null) return $"Invoice #{repeated.Key} appears more than once in this payment. Record it once.";
+            foreach (var p in payments)
+            {
+                var inv = $"invoice #{p.RentInvoiceId}";
+                bool cash = p.PaymentAmount > 0;
+                var method = p.PaymentMethod?.Trim();
+                if (cash ? !CashMethods.Contains(method) : !(CashMethods.Contains(method) || method == NoCashMethod || string.IsNullOrEmpty(method)))
+                    return $"Payment method for {inv} must be one of: {string.Join(", ", CashMethods)}.";
+                if (p.PaymentDate.Date < new DateTime(2000, 1, 1) || p.PaymentDate.Date > today.AddDays(1))
+                    return $"Payment date for {inv} can't be in the future.";
+                if (p.PaymentAmount > MaxPaymentAmount || p.DiscountAmount > MaxPaymentAmount)
+                    return $"Amount for {inv} is too large.";
+                if (p.PaymentAmount != decimal.Round(p.PaymentAmount, 2) || p.DiscountAmount != decimal.Round(p.DiscountAmount, 2))
+                    return $"Amounts for {inv} can have at most 2 decimal places.";
+                if (p.DiscountPercent < 0 || p.DiscountPercent > 100) return $"Discount % for {inv} must be between 0 and 100.";
+                if (p.Notes?.Length > 500) return $"Notes for {inv} can be at most 500 characters.";
+                p.PaymentMethod = string.IsNullOrEmpty(method) ? NoCashMethod : method;
+            }
+            return null;
+        }
+
         // Records new payments; all of them share one connection and transaction, so a failure rolls every one back.
         public async Task<ApiResponse> SubmitPaymentsAsync(List<Payments> payments, int userId)
         {
+            // Business date (Pakistan) + 1 day of slack for a browser clock that is slightly ahead around midnight
+            var fieldError = ValidatePaymentFields(payments, BusinessDate.Today);
+            if (fieldError != null) return new ApiResponse { IsSuccess = false, Message = fieldError, ErrorMessage = fieldError };
+
             using var conn = await _dal.GetOpenConnectionAsync();
             using var transaction = conn.BeginTransaction();
             var receiptIds = new List<int>(); // payments with money received: each one has a printable receipt
@@ -114,10 +155,12 @@ namespace TRL_API.BLL
         {
             if (string.IsNullOrWhiteSpace(reason))
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "Reason is required." };
+            if (reason.Trim().Length > RentHistoryService.InvoiceAuditReasonMax)
+                return new ApiResponse { IsSuccess = false, ErrorMessage = $"The reason can be at most {RentHistoryService.InvoiceAuditReasonMax} characters." };
             var dt = await _dal.ReverseLateFeeAsync(invoiceId, reason.Trim(), userId);
             return Convert.ToDecimal(dt.Rows[0]["Fee"]) > 0
                 ? new ApiResponse { IsSuccess = true, Message = "Late fee reversed." }
-                : new ApiResponse { IsSuccess = false, ErrorMessage = "Nothing to reverse (no charged fee, or payments already cover it)." };
+                : new ApiResponse { IsSuccess = false, ErrorMessage = "Nothing to reverse (no charged fee, payments already cover it, or the invoice is part of a move-out settlement)." };
         }
 
         public async Task<ApiResponse> CreateRentAsync(List<Payments> payments, int userId) =>
@@ -147,10 +190,10 @@ namespace TRL_API.BLL
             "IS_REVERSAL" => "This record is itself a reversal and can't be reversed.",
             "ALREADY_REVERSED" => $"Payment #{paymentId} has already been reversed.",
             "SETTLEMENT" => "This record belongs to a finalized move-out settlement and can't be reversed here.",
-            "ADJUSTMENT" => "Adjustments can't be reversed. Record a new adjustment instead.",
+            "ADJUSTMENT" => "Adjustments can't be reversed.",
             "NOTHING" => "This record has no amount, discount or waiver to reverse.",
             "CANCELLED" => "The invoice is cancelled, so its payments can't be reversed.",
-            "NEGATIVE" => "An adjustment has already taken back part of this payment, so reversing it would leave a negative total. Correct it with an adjustment instead.",
+            "NEGATIVE" => "An adjustment has already taken back part of this payment, so reversing it would leave a negative total.",
             _ => "The payment could not be reversed.",
         };
 
@@ -189,46 +232,39 @@ namespace TRL_API.BLL
             };
         }
 
-        public async Task<ApiResponse> CreatePaymentAdjustmentAsync(Payments payment, int userId)
+        public const int MaxDueDateInvoices = 500;
+
+        // Request checks before the database is touched (null = fine)
+        public static string? ValidateDueDateChange(List<int>? invoiceIds, DateTime newDueDate, DateTime today)
         {
-            using var conn = await _dal.GetOpenConnectionAsync();
-            using var transaction = conn.BeginTransaction();
-
-            var err = await _dal.ValidateAdjustmentAsync(payment, conn, transaction);
-            if (err != null)
-            {
-                transaction.Rollback();
-                return new ApiResponse { IsSuccess = false, ErrorMessage = err };
-            }
-
-            var insertResult = await _dal.CreatePaymentAdjustmentAsync(payment, userId, conn, transaction);
-            if (!insertResult.IsSuccess)
-            {
-                transaction.Rollback();
-                return new ApiResponse { IsSuccess = false, ErrorMessage = "Failed to record adjustment." };
-            }
-
-            // FIX: the original adjustment path only inserted into Payments and
-            // never touched RentInvoices — meaning an adjustment that fully paid
-            // off an invoice would never update its StatusId, and it would keep
-            // showing as Unpaid/Partial in the collections list forever.
-            var recalcResult = await _dal.RecalcInvoiceAsync(payment.RentInvoiceId, conn, transaction);
-            if (!recalcResult.IsSuccess)
-            {
-                transaction.Rollback();
-                return new ApiResponse { IsSuccess = false, ErrorMessage = $"Failed to update invoice #{payment.RentInvoiceId} after adjustment." };
-            }
-
-            transaction.Commit();
-            return new ApiResponse { IsSuccess = true, Message = "Adjustment recorded." };
+            if (invoiceIds == null || invoiceIds.Count == 0) return "Select at least one invoice.";
+            if (invoiceIds.Count > MaxDueDateInvoices) return $"Update at most {MaxDueDateInvoices} invoices at a time.";
+            if (invoiceIds.Any(id => id <= 0)) return "One or more selected invoices are invalid.";
+            if (newDueDate.Date < new DateTime(2000, 1, 1) || newDueDate.Date > today.AddYears(1))
+                return "Please choose a due date no more than a year from today.";
+            return null;
         }
 
-        public async Task<ApiResponse> BulkUpdateDueDateAsync(List<int> invoiceIds, DateTime newDueDate)
+        public async Task<ApiResponse> BulkUpdateDueDateAsync(List<int>? invoiceIds, DateTime newDueDate, int userId)
         {
-            var result = await _dal.BulkUpdateDueDateAsync(invoiceIds, newDueDate);
-            return result.IsSuccess
-                ? new ApiResponse { IsSuccess = true, Message = $"Due date updated for {invoiceIds.Count} invoice(s)." }
-                : new ApiResponse { IsSuccess = false, ErrorMessage = "Failed to update due dates." };
+            var err = ValidateDueDateChange(invoiceIds, newDueDate, BusinessDate.Today);
+            if (err != null) return new ApiResponse { IsSuccess = false, Message = err, ErrorMessage = err };
+
+            var row = (await _dal.BulkUpdateDueDateAsync(invoiceIds!, newDueDate, userId)).Rows[0];
+            int updated = Convert.ToInt32(row["Updated"]), requested = Convert.ToInt32(row["Requested"]);
+            const string skippedWhy = "only unpaid or partly paid invoices that are not part of a move-out settlement can be changed, and not to a date before the invoice date";
+            if (updated == 0)
+            {
+                var msg = $"No due date was changed: {skippedWhy}.";
+                return new ApiResponse { IsSuccess = false, Message = msg, ErrorMessage = msg };
+            }
+            return new ApiResponse
+            {
+                IsSuccess = true,
+                RowsAffected = updated,
+                Message = $"Due date updated for {updated} invoice(s)."
+                          + (updated < requested ? $" {requested - updated} skipped: {skippedWhy}." : ""),
+            };
         }
 
         public async Task<DataTable> GetActiveTenantsAsync() => await _dal.GetActiveTenantsList();
@@ -246,7 +282,7 @@ namespace TRL_API.BLL
 
             // Billing window: last month (for a run done late, early in the new month), this month and next month.
             // Older months are never generated, so months that were never invoiced in the past can't be billed by accident.
-            var thisMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+            var thisMonth = new DateTime(BusinessDate.Today.Year, BusinessDate.Today.Month, 1);
             var requested = new DateTime(year, month, 1);
             if (requested < thisMonth.AddMonths(-1) || requested > thisMonth.AddMonths(1))
                 return new ApiResponse
@@ -376,12 +412,12 @@ namespace TRL_API.BLL
         // All or nothing; the related invoice (if any) is never changed.
         public async Task<ApiResponse> CreateExtraChargeAsync(ExtraChargeRequest req)
         {
-            var error = ValidateExtraCharge(req, DateTime.Today);
+            var error = ValidateExtraCharge(req, BusinessDate.Today);
             if (error != null)
                 return new ApiResponse { IsSuccess = false, ErrorMessage = error };
 
             var settings = await _lateFeeSettings.GetAsync();
-            var chargeDate = (req.ChargeDate ?? DateTime.Today).Date;
+            var chargeDate = (req.ChargeDate ?? BusinessDate.Today).Date;
             var dueDate = chargeDate.AddDays(req.DueInDays ?? settings.PaymentDueDays);
             var tenantIds = req.TenantIds.Distinct().ToList();
             var description = string.IsNullOrWhiteSpace(req.Description) ? null : req.Description.Trim();
@@ -402,7 +438,7 @@ namespace TRL_API.BLL
                         : $"{req.ChargeType} charge of {req.Amount:N0} added for {dt.Rows.Count} tenants, due {dueDate:dd MMM yyyy}.",
                 },
                 "BAD_TENANT" => new ApiResponse { IsSuccess = false, ErrorMessage = "One or more selected tenants don't exist. Nothing was added." },
-                "BAD_RELATED" => new ApiResponse { IsSuccess = false, ErrorMessage = "The related invoice doesn't exist or belongs to another tenant. Nothing was added." },
+                "BAD_RELATED" => new ApiResponse { IsSuccess = false, ErrorMessage = "The related invoice doesn't exist, is cancelled, or belongs to another tenant. Nothing was added." },
                 "DUPLICATE" => new ApiResponse { IsSuccess = false, ErrorMessage = "This charge was just added. It wasn't added again." },
                 "BUSY" => new ApiResponse { IsSuccess = false, ErrorMessage = "Another charge is being added right now. Please try again." },
                 _ => new ApiResponse { IsSuccess = false, ErrorMessage = "The charge could not be added." },
@@ -419,7 +455,7 @@ namespace TRL_API.BLL
             var fee = Convert.ToDecimal(dt.Rows[0]["Fee"]);
             return fee > 0
                 ? new ApiResponse { IsSuccess = true, Message = $"Late fee of {fee:N0} charged." }
-                : new ApiResponse { IsSuccess = false, ErrorMessage = "Late fee is not applicable or was already charged." };
+                : new ApiResponse { IsSuccess = false, ErrorMessage = "Late fee is not applicable, was already charged, or the invoice is part of a move-out settlement." };
         }
     }
 }

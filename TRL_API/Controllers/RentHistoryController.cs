@@ -49,12 +49,16 @@ namespace TRL_API.Controllers
         }
 
         [Authorize(Roles = "Admin")]
+        // The reason travels in the body (not the URL), so it doesn't end up in server or proxy logs
         [HttpPatch("CancelInvoice")]
-        public async Task<IActionResult> CancelInvoice([FromBody] int id, [FromQuery] string? reason)
+        public async Task<IActionResult> CancelInvoice([FromBody] CancelInvoiceRequest req)
         {
-            if (id <= 0) return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "Invoice is required." });
-            return Ok(await _service.CancelInvoice(id, reason, User.GetUserId()));
+            if (req == null || req.InvoiceId <= 0) return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "Invoice is required." });
+            var response = await _service.CancelInvoice(req.InvoiceId, req.Reason, User.GetUserId());
+            return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
+
+        public class CancelInvoiceRequest { public int InvoiceId { get; set; } public string? Reason { get; set; } }
 
         [Authorize(Roles = "Admin")]
         [HttpPatch("ReinstateInvoice")]
@@ -63,8 +67,8 @@ namespace TRL_API.Controllers
             if (id <= 0)
                 return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "Invoice is required." });
 
-            var response = await _service.ReinstateInvoice(id);
-            return Ok(response);
+            var response = await _service.ReinstateInvoice(id, User.GetUserId());
+            return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
     }
 }

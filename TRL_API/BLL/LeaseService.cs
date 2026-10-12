@@ -1,4 +1,5 @@
 ﻿using System.Data;
+using TRL_API.Helpers;
 using TRL_API.DAL;
 using TRL_API.Models;
 
@@ -20,21 +21,30 @@ namespace TRL_API.BLL
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "Rent must be greater than zero." };
             if (lease.TenureMonths <= 0)
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "Tenure must be at least 1 month." };
+            if (lease.StartDate.Date < new DateTime(2000, 1, 1) || lease.StartDate.Date > BusinessDate.Today.AddYears(2))
+                return new ApiResponse { IsSuccess = false, ErrorMessage = "Please choose a start date no more than two years from today." };
 
-            var billedThrough = await _dal.GetOverlappingBilledThroughAsync(lease.UnitId, lease.StartDate);
-            if (billedThrough != null)
-                return new ApiResponse { IsSuccess = false, ErrorMessage = $"This unit is billed to an earlier lease through {billedThrough:dd MMM yyyy}. Start the new lease after that date." };
-
+            const string leased = "This unit already has an active lease.";
             try
             {
-                var result = await _dal.CreateAsync(lease, userId);
-                return result.IsSuccess
-                    ? new ApiResponse { IsSuccess = true, Message = "Lease created successfully." }
-                    : new ApiResponse { IsSuccess = false, ErrorMessage = "Failed to create lease." };
+                var row = (await _dal.CreateAsync(lease, userId)).Rows[0];
+                return row["Result"].ToString() switch
+                {
+                    "OK" => new ApiResponse { IsSuccess = true, Message = "Lease created successfully." },
+                    "UNIT_NOT_FOUND" => new ApiResponse { IsSuccess = false, ErrorMessage = "The unit doesn't exist or has been deleted." },
+                    "TENANT_NOT_FOUND" => new ApiResponse { IsSuccess = false, ErrorMessage = "The tenant doesn't exist or has been deleted." },
+                    "OVERLAP" => new ApiResponse
+                    {
+                        IsSuccess = false,
+                        ErrorMessage = $"This unit is billed to an earlier lease through {Convert.ToDateTime(row["Info"]):dd MMM yyyy}. Start the new lease after that date.",
+                    },
+                    "UNIT_LEASED" => new ApiResponse { IsSuccess = false, ErrorMessage = leased },
+                    _ => new ApiResponse { IsSuccess = false, ErrorMessage = "Failed to create lease." },
+                };
             }
             catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number is 2601 or 2627)
             {
-                return new ApiResponse { IsSuccess = false, ErrorMessage = "This unit already has an active lease." };
+                return new ApiResponse { IsSuccess = false, ErrorMessage = leased }; // UX_TenantLeases_ActiveUnit
             }
         }
 
@@ -63,8 +73,8 @@ namespace TRL_API.BLL
             if (req.Reason.Length > 200)
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "The reason can be at most 200 characters." };
 
-            var moveOut = req.MoveOutDate?.Date ?? DateTime.Today;
-            if (moveOut > DateTime.Today)
+            var moveOut = req.MoveOutDate?.Date ?? BusinessDate.Today;
+            if (moveOut > BusinessDate.Today)
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "Move-out date can't be in the future. End the lease on the day the tenant leaves." };
 
             return await _dal.TerminateAsync(req, moveOut, userId);

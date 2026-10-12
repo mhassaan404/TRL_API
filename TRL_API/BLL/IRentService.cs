@@ -20,8 +20,7 @@ namespace TRL_API.BLL
         Task<ApiResponse> ReverseLateFeeAsync(int invoiceId, string reason, int userId);
         Task<ApiResponse> CreateRentAsync(List<Payments> payments, int userId);
         Task<ApiResponse> ReversePaymentAsync(int paymentId, string? reason, int userId);
-        Task<ApiResponse> CreatePaymentAdjustmentAsync(Payments payment, int userId);
-        Task<ApiResponse> BulkUpdateDueDateAsync(List<int> invoiceIds, DateTime newDueDate);
+        Task<ApiResponse> BulkUpdateDueDateAsync(List<int>? invoiceIds, DateTime newDueDate, int userId);
         Task<DataTable> GetActiveTenantsAsync();
         Task<ApiResponse> GenerateInvoicesAsync(int month, int year, int? dueInDays, List<int>? tenantIds);
         Task<ApiResponse> CreateExtraChargeAsync(ExtraChargeRequest req);

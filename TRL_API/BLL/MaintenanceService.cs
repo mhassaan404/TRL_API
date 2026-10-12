@@ -1,4 +1,5 @@
 using System.Data;
+using TRL_API.Helpers;
 using TRL_API.DAL;
 using TRL_API.Models;
 
@@ -54,13 +55,13 @@ namespace TRL_API.BLL
 
         public async Task<ApiResponse> SaveAsync(MaintenanceJobRequest req, int userId)
         {
-            var error = ValidateJob(req, DateTime.Today);
+            var error = ValidateJob(req, BusinessDate.Today);
             if (error != null) return Fail(error);
 
             req.Title = req.Title.Trim();
             req.Description = Clean(req.Description);
             req.AssignedTo = Clean(req.AssignedTo);
-            var reported = (req.ReportedDate ?? DateTime.Today).Date;
+            var reported = (req.ReportedDate ?? BusinessDate.Today).Date;
 
             if (req.Id == 0)
             {
@@ -84,8 +85,8 @@ namespace TRL_API.BLL
             var note = Clean(req.Note);
             if (note?.Length > 500) return Fail("Note can be at most 500 characters.");
             if (req.Status == "Cancelled" && note == null) return Fail("Please enter a reason for cancelling the job.");
-            var completed = (req.CompletedDate ?? DateTime.Today).Date;
-            if (req.Status == "Completed" && completed > DateTime.Today) return Fail("The completed date can't be in the future.");
+            var completed = (req.CompletedDate ?? BusinessDate.Today).Date;
+            if (req.Status == "Completed" && completed > BusinessDate.Today) return Fail("The completed date can't be in the future.");
 
             var result = await _dal.ChangeStatusAsync(req.Id, req.Status, note, req.Status == "Completed" ? completed : null, userId);
             return result == "OK"
@@ -104,7 +105,7 @@ namespace TRL_API.BLL
             if (req.DueInDays is < 0 or > 90) return Fail("Due days must be between 0 and 90.");
 
             var settings = await _lateFeeSettings.GetAsync();
-            var dueDate = DateTime.Today.AddDays(req.DueInDays ?? settings.PaymentDueDays);
+            var dueDate = BusinessDate.Today.AddDays(req.DueInDays ?? settings.PaymentDueDays);
             var (result, invoiceId) = await _dal.BillAsync(req.Id, req.Amount, description ?? $"Maintenance job #{req.Id}", dueDate,
                 req.ApplyLateFee ? settings.LateFeePerDay : 0, settings.MaxLateFeeMultiplier, userId);
 

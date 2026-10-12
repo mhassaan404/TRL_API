@@ -19,7 +19,7 @@ namespace TRL_API.DAL
             ;WITH Months AS
             (
                 SELECT 
-                    DATEADD(MONTH, -v.number, DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)) AS MonthStart
+                    DATEADD(MONTH, -v.number, DATEFROMPARTS(YEAR(dbo.BusinessToday()), MONTH(dbo.BusinessToday()), 1)) AS MonthStart
                 FROM master..spt_values v
                 WHERE v.type = 'P' AND v.number BETWEEN 0 AND 6
             )

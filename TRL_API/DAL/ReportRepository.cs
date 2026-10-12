@@ -12,10 +12,10 @@ namespace TRL_API.DAL
 
         // Arrears ageing: every open invoice (same statuses and balances as Rent Collection) with its days overdue.
         // Owed = Balance (incl. a charged late fee) + the open late fee not charged yet; a negative balance is a credit.
-        // Days overdue use the UTC date, like the late fee in dbo.InvoiceBalance, so both always agree.
+        // Days overdue use the business date (dbo.BusinessToday), like the late fee in dbo.InvoiceBalance, so both always agree.
         public async Task<DataTable> GetArrearsAgeingAsync() =>
             await _dbHelper.ExecuteQueryReturnDataTableAsync(@"
-                DECLARE @Today DATE = CAST(GETUTCDATE() AS DATE);
+                DECLARE @Today DATE = dbo.BusinessToday();
                 SELECT ri.Id AS InvoiceId, ri.LeaseId, t.TenantId, t.Name AS TenantName, t.Contact AS Phone,
                        bd.BuildingName, f.FloorNumber, u.UnitNumber,
                        ri.InvoiceDate, ri.InvoiceMonth, ri.DueDate, ri.ChargeType,
@@ -99,7 +99,7 @@ namespace TRL_API.DAL
                        ISNULL((SELECT SUM(bal.OpenLateFee)
                                FROM RentInvoices ri CROSS APPLY dbo.InvoiceBalance(ri.Id, 0) bal
                                WHERE ri.TenantId = t.TenantId AND ri.StatusId IN (2, 8, 9)), 0) AS OpenLateFee,
-                       CAST(GETUTCDATE() AS DATE) AS AsOfDate
+                       dbo.BusinessToday() AS AsOfDate
                 FROM Tenants t
                 WHERE t.TenantId = @TenantId;",
                 new[] { new SqlParameter("@TenantId", tenantId) });
@@ -212,7 +212,7 @@ namespace TRL_API.DAL
                        ISNULL(b.CancelledInvoices, 0) AS CancelledInvoices,
                        ISNULL(b.CancelledAmount, 0) AS CancelledAmount,
                        ISNULL(c.CashReceived, 0) AS CashReceived,
-                       CAST(GETUTCDATE() AS DATE) AS AsOfDate
+                       dbo.BusinessToday() AS AsOfDate
                 FROM Months m
                 OUTER APPLY (
                     SELECT SUM(CASE WHEN i.StatusId <> 6 THEN 1 ELSE 0 END) AS Invoices,
@@ -254,7 +254,7 @@ namespace TRL_API.DAL
         // Today = server local date, the same as lease expiry in LeaseRepository.
         public async Task<DataTable> GetRentRollAsync() =>
             await _dbHelper.ExecuteQueryReturnDataTableAsync(@"
-                DECLARE @Today DATE = CAST(GETDATE() AS DATE);
+                DECLARE @Today DATE = dbo.BusinessToday();
                 SELECT u.UnitId, b.BuildingId, b.BuildingName, f.FloorNumber, u.UnitNumber, u.PropertyType, u.BaseRent,
                        us.Name AS MarkedStatus,
                        CAST(CASE WHEN EXISTS (SELECT 1 FROM TenantLeases tl WHERE tl.UnitId = u.UnitId AND tl.IsActive = 1)

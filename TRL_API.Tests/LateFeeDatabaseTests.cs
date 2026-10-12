@@ -53,7 +53,7 @@ namespace TRL_API.Tests
 
         private static async Task<decimal> Fee(int daysOverdue, decimal rent, decimal perDay, decimal max) =>
             await InRollback(async (con, tx) => Convert.ToDecimal(await Scalar(con, tx,
-                "SELECT dbo.CalculateLateFee(@Rent, @Rent, DATEADD(DAY, -@Days, CAST(GETUTCDATE() AS DATE)), GETUTCDATE(), @PerDay, @Max)",
+                "SELECT dbo.CalculateLateFee(@Rent, @Rent, DATEADD(DAY, -@Days, dbo.BusinessToday()), GETUTCDATE(), @PerDay, @Max)",
                 new SqlParameter("@Rent", rent), new SqlParameter("@Days", daysOverdue),
                 new SqlParameter("@PerDay", perDay), new SqlParameter("@Max", max))));
 
@@ -89,8 +89,8 @@ namespace TRL_API.Tests
                 var id = Convert.ToInt32(await Scalar(con, tx, @"
                     INSERT INTO RentInvoices (TenantId, TotalRent, PendingAmount, OverPaidAmount, InvoiceDate, DueDate, StatusId,
                                               CreatedAt, LateFeePerDay, LateFeeMaxMultiplier)
-                    VALUES ((SELECT TOP 1 TenantId FROM Tenants), 10000, 10000, 0, DATEADD(DAY, -15, CAST(GETUTCDATE() AS DATE)),
-                            DATEADD(DAY, -10, CAST(GETUTCDATE() AS DATE)), 2, GETDATE(), 300, 2);
+                    VALUES ((SELECT TOP 1 TenantId FROM Tenants), 10000, 10000, 0, DATEADD(DAY, -15, dbo.BusinessToday()),
+                            DATEADD(DAY, -10, dbo.BusinessToday()), 2, GETDATE(), 300, 2);
                     SELECT CAST(SCOPE_IDENTITY() AS INT);"));
                 const string open = "SELECT OpenLateFee FROM dbo.InvoiceBalance(@Id, 0)";
                 var b = Convert.ToDecimal(await Scalar(con, tx, open, new SqlParameter("@Id", id)));
@@ -113,8 +113,8 @@ namespace TRL_API.Tests
                 async Task<int> Invoice(decimal lateFeeCharged) => Convert.ToInt32(await Scalar(con, tx, @"
                     INSERT INTO RentInvoices (TenantId, TotalRent, PendingAmount, OverPaidAmount, InvoiceDate, DueDate, StatusId,
                                               CreatedAt, LateFeePerDay, LateFeeMaxMultiplier, LateFeeCharged)
-                    VALUES ((SELECT TOP 1 TenantId FROM Tenants), 10000, 10000, 0, DATEADD(DAY, -15, CAST(GETUTCDATE() AS DATE)),
-                            DATEADD(DAY, -10, CAST(GETUTCDATE() AS DATE)), 2, GETDATE(), 500, 2, @Charged);
+                    VALUES ((SELECT TOP 1 TenantId FROM Tenants), 10000, 10000, 0, DATEADD(DAY, -15, dbo.BusinessToday()),
+                            DATEADD(DAY, -10, dbo.BusinessToday()), 2, GETDATE(), 500, 2, @Charged);
                     SELECT CAST(SCOPE_IDENTITY() AS INT);", new SqlParameter("@Charged", lateFeeCharged)));
                 async Task Pay(int id, decimal amount, bool waive) => await Scalar(con, tx, @"
                     INSERT INTO Payments (RentInvoiceId, TenantId, PaymentAmount, PaymentDate, PaymentMethod, DiscountAmount, DiscountPercent, IsLateFeeWaived)

@@ -361,3 +361,5 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+# E2E suite build output (e2e/run.mjs)
+e2e/.out/

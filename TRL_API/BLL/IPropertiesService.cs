@@ -20,8 +20,8 @@ namespace TRL_API.BLL
         Task<ApiResponse> SaveFloor(int buildingId, string floorNumber);
         Task<ApiResponse> UpdateFloor(int floorId, string floorNumber);
         Task<ApiResponse> DeleteFloor(int floorId);
-        Task<ApiResponse> SaveUnit(int floorId, int buildingId, string unitNumber, int statusId, double baseRent, string? note, string? propertyType);
-        Task<ApiResponse> UpdateUnit(int unitId, int floorId, int buildingId, string unitNumber, int statusId, double baseRent, string? note, string? propertyType);
+        Task<ApiResponse> SaveUnit(int floorId, int buildingId, string unitNumber, int statusId, decimal baseRent, string? note, string? propertyType);
+        Task<ApiResponse> UpdateUnit(int unitId, int floorId, int buildingId, string unitNumber, int statusId, decimal baseRent, string? note, string? propertyType);
         Task<ApiResponse> DeleteUnitAsync(int unitId);
     }
 }

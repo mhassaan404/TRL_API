@@ -39,6 +39,20 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 
+-- Today's business date: Pakistan (UTC+5, no daylight saving), whatever time zone the server runs in
+CREATE   FUNCTION dbo.BusinessToday()
+RETURNS DATE
+AS
+BEGIN
+    RETURN CAST(DATEADD(HOUR, 5, SYSUTCDATETIME()) AS DATE);
+END
+GO
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
 CREATE   FUNCTION dbo.InvoiceBalance (@InvoiceId INT, @ExcludePaymentId INT)
 RETURNS TABLE
 AS
@@ -47,9 +61,9 @@ RETURN
            ri.TotalRent - p.Paid - p.Disc AS RentBalance,
            ri.TotalRent + ri.LateFeeCharged - p.Paid - p.Disc AS Balance,
            CAST(CASE WHEN ri.LateFeeCharged = 0 AND p.Waived = 0
-                          AND ri.DueDate < CAST(GETUTCDATE() AS DATE)
+                          AND ri.DueDate < dbo.BusinessToday()
                           AND ri.TotalRent - p.Paid - p.Disc > 0
-                     THEN dbo.CalculateLateFee(ri.TotalRent - p.Paid - p.Disc, ri.TotalRent, ri.DueDate, GETUTCDATE(),
+                     THEN dbo.CalculateLateFee(ri.TotalRent - p.Paid - p.Disc, ri.TotalRent, ri.DueDate, dbo.BusinessToday(),
                                                ri.LateFeePerDay, ri.LateFeeMaxMultiplier)
                      ELSE 0 END AS DECIMAL(18, 2)) AS OpenLateFee
     FROM dbo.RentInvoices ri

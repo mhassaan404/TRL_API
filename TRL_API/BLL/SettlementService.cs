@@ -1,4 +1,5 @@
 using System.Data;
+using TRL_API.Helpers;
 using TRL_API.DAL;
 using TRL_API.Models;
 
@@ -28,7 +29,7 @@ namespace TRL_API.BLL
 
         public async Task<ApiResponse> FinalizeAsync(FinalizeSettlementRequest r, int userId)
         {
-            var error = ValidateFinalize(r, DateTime.Today);
+            var error = ValidateFinalize(r, BusinessDate.Today);
             if (error != null) return Fail(error);
 
             var (result, id, extra) = await _dal.FinalizeAsync(r, userId);
@@ -55,7 +56,7 @@ namespace TRL_API.BLL
 
         public async Task<ApiResponse> RecordRefundAsync(RecordSettlementRefundRequest r, int userId)
         {
-            var error = ValidateRefund(r, DateTime.Today);
+            var error = ValidateRefund(r, BusinessDate.Today);
             if (error != null) return Fail(error);
 
             var (result, info) = await _dal.RecordRefundAsync(r, userId);

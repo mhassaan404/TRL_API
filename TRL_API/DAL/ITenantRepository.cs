@@ -9,7 +9,7 @@ namespace TRL_API.DAL
         Task<DataTable> GetTenants();
         Task<ApiResponse> SaveTenantAsync(Tenants tenant);
         Task<ApiResponse> UpdateTenantAsync(Tenants tenant);
-        Task<ApiResponse> DeleteTenantAsync(int tenantId, int userId);
+        Task<string> DeleteTenantAsync(int tenantId, int userId);
         Task<bool> HasActiveLeaseAsync(int tenantId);
     }
 }

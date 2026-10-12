@@ -80,26 +80,15 @@ namespace TRL_API.BLL
 
         public async Task<ApiResponse> DeleteTenantAsync(int tenantId, int userId)
         {
-            try
+            static ApiResponse Fail(string m) => new() { IsSuccess = false, Message = m, ErrorMessage = m };
+            return await _dal.DeleteTenantAsync(tenantId, userId) switch
             {
-                if (await _dal.HasActiveLeaseAsync(tenantId))
-                    return new ApiResponse { IsSuccess = false, Message = "This tenant has an active lease. Terminate the lease before deleting the tenant." };
-
-                var result = await _dal.DeleteTenantAsync(tenantId, userId);
-
-                if (result.IsSuccess)
-                    return new ApiResponse { IsSuccess = true, Message = "Tenant deleted successfully." };
-
-                return new ApiResponse { IsSuccess = false, Message = "Tenant not found or already deleted." };
-            }
-            catch (SqlException ex) when (ex.Number == 547) // foreign key violation
-            {
-                return new ApiResponse
-                {
-                    IsSuccess = false,
-                    Message = "Cannot delete tenant because it is referenced in another record or there are related invoices."
-                };
-            }
+                "OK" => new ApiResponse { IsSuccess = true, Message = "Tenant deleted successfully." },
+                "HAS_LEASE" => Fail("This tenant has an active lease. Terminate the lease before deleting the tenant."),
+                "OPEN_BALANCE" => Fail("This tenant still owes money or has a credit on an invoice. Settle it first (Move-out Settlements)."),
+                "DEPOSIT_HELD" => Fail("A security deposit is still held for this tenant. Refund or apply it first (Move-out Settlements)."),
+                _ => Fail("Tenant not found or already deleted."),
+            };
         }
     }
 }

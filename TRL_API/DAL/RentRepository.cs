@@ -90,6 +90,7 @@ namespace TRL_API.DAL
         {
             string query = @"
                 SELECT
+                    p.Id AS PaymentId,
                     p.PaymentDate,
                     ri.TotalRent AS MonthlyRent,
                     ISNULL(p.PaymentAmount, 0) AS PaidAmount,
@@ -117,7 +118,10 @@ namespace TRL_API.DAL
                     ISNULL(p.DiscountPercent, 0) AS DiscountPercent,
                     ISNULL(p.IsLateFeeWaived, 0) AS waveLateFee,
                     ISNULL(p.PaymentMethod, '') AS PaymentMethod,
-                    ISNULL(p.Notes, '') AS Notes
+                    ISNULL(p.Notes, '') AS Notes,
+                    -- reversal rows point to the payment they take back; a reversed payment is marked by its reversal
+                    p.ReversalOfPaymentId,
+                    (SELECT rv.Id FROM Payments rv WHERE rv.ReversalOfPaymentId = p.Id) AS ReversedByPaymentId
 
                 FROM Payments p
                 INNER JOIN RentInvoices ri ON p.RentInvoiceId = ri.Id
@@ -177,7 +181,7 @@ namespace TRL_API.DAL
                                  WHERE dp1.RentInvoiceId = ri.Id AND dp1.ReversalOfPaymentId IS NULL
                                    AND NOT EXISTS (SELECT 1 FROM Payments dp2 WHERE dp2.ReversalOfPaymentId = dp1.Id)) dp
                     LEFT JOIN Tenants t ON ri.TenantId = t.TenantId
-                    WHERE ri.StatusId IN (2, 3, 4, 8) AND ri.TenantId = @TenantId
+                    WHERE ri.StatusId IN (2, 8, 9) AND ri.TenantId = @TenantId -- same open invoices as Rent Collection
                 )
                 SELECT b.*,
                        SUM(b.RemainingAmount) OVER (PARTITION BY b.TenantId ORDER BY b.DueDate
@@ -195,59 +199,6 @@ namespace TRL_API.DAL
         // =========================
         // Payment writes
         // =========================
-
-        // An adjustment is a reversal: a negative amount no larger than what has been paid on the invoice.
-        // Locks the invoice row so two concurrent reversals can't both pass the check.
-        public async Task<string?> ValidateAdjustmentAsync(Payments p, SqlConnection conn, SqlTransaction tx)
-        {
-            if (p.PaymentAmount >= 0) return "Adjustment amount must be a negative (reversal) amount.";
-            if (string.IsNullOrWhiteSpace(p.Notes)) return "A reason is required for an adjustment.";
-
-            const string q = @"
-                SELECT ri.TenantId, ri.StatusId,
-                       (SELECT ISNULL(SUM(PaymentAmount),0) FROM Payments WHERE RentInvoiceId = ri.Id) AS Paid
-                FROM RentInvoices ri WITH (UPDLOCK, HOLDLOCK)
-                WHERE ri.Id = @Id;";
-
-            using var cmd = new SqlCommand(q, conn, tx);
-            cmd.Parameters.AddWithValue("@Id", p.RentInvoiceId);
-            using var r = await cmd.ExecuteReaderAsync();
-            if (!await r.ReadAsync()) return "Invoice not found.";
-
-            if (Convert.ToInt32(r["TenantId"]) != p.TenantId) return "Invoice does not belong to this tenant.";
-            if (Convert.ToInt32(r["StatusId"]) == 6) return "This invoice is cancelled.";
-
-            decimal paid = Convert.ToDecimal(r["Paid"]);
-            if (-p.PaymentAmount > paid + 0.005m)
-                return $"Cannot reverse more than the {paid:N0} paid on invoice #{p.RentInvoiceId}.";
-            return null;
-        }
-
-        public async Task<ApiResponse> CreatePaymentAdjustmentAsync(Payments payment, int userId, SqlConnection conn, SqlTransaction transaction)
-        {
-            string query = @"
-                INSERT INTO Payments
-                    (TenantId, PaymentAmount, PaymentDate, RentInvoiceId, PaymentMethod, Notes,
-                        DiscountAmount, DiscountPercent, IsLateFeeWaived, CreatedBy, CreatedAt)
-                VALUES
-                    (@TenantId, @PaymentAmount, GETDATE(), @RentInvoiceId, @PaymentMethod, @Notes,
-                        @DiscountAmount, @DiscountPercent, @IsLateFeeWaived, @CreatedBy, GETDATE());";
-
-            var parameters = new[]
-            {
-                new SqlParameter("@TenantId", payment.TenantId),
-                new SqlParameter("@PaymentAmount", payment.PaymentAmount),
-                new SqlParameter("@RentInvoiceId", payment.RentInvoiceId),
-                new SqlParameter("@PaymentMethod", string.IsNullOrWhiteSpace(payment.PaymentMethod) ? (object)DBNull.Value : payment.PaymentMethod),
-                new SqlParameter("@Notes", string.IsNullOrWhiteSpace(payment.Notes) ? (object)DBNull.Value : payment.Notes),
-                new SqlParameter("@DiscountAmount", payment.DiscountAmount),
-                new SqlParameter("@DiscountPercent", payment.DiscountPercent),
-                new SqlParameter("@IsLateFeeWaived", payment.IsLateFeeWaived),
-                new SqlParameter("@CreatedBy", userId),
-            };
-
-            return await _dbHelper.ExecuteQueryAsync(query, parameters, conn, transaction);
-        }
 
         public async Task<ApiResponse> CreateRentAsync(Payments payment, int userId, SqlConnection conn, SqlTransaction transaction)
         {
@@ -320,7 +271,7 @@ namespace TRL_API.DAL
                 INSERT INTO Payments
                     (TenantId, PaymentAmount, PaymentDate, RentInvoiceId, PaymentMethod, Notes,
                      DiscountAmount, DiscountPercent, IsLateFeeWaived, CreatedBy, CreatedAt, ReversalOfPaymentId)
-                SELECT TenantId, -PaymentAmount, GETDATE(), RentInvoiceId, PaymentMethod, @Reason,
+                SELECT TenantId, -PaymentAmount, CAST(dbo.BusinessToday() AS DATETIME), RentInvoiceId, PaymentMethod, @Reason,
                        -DiscountAmount, 0, 0, @UserId, GETDATE(), Id
                 FROM Payments WHERE Id = @PaymentId;
                 SET @NewId = SCOPE_IDENTITY();
@@ -401,21 +352,29 @@ namespace TRL_API.DAL
 
         public async Task<DataTable> ReverseLateFeeAsync(int invoiceId, string reason, int userId)
         {
+            // One transaction; the invoice row is locked first (same order as payments), so a payment can't change the
+            // balance between the check and the update.
             string query = @"
-                DECLARE @Fee DECIMAL(18,2);
+                SET XACT_ABORT ON;
+                DECLARE @Fee DECIMAL(18,2), @Locked INT;
+                BEGIN TRAN;
+                SELECT @Locked = Id FROM RentInvoices WITH (UPDLOCK, HOLDLOCK) WHERE Id = @InvoiceId;
                 -- Only while payments haven't eaten into the fee yet (rent balance still >= 0)
                 SELECT @Fee = ri.LateFeeCharged
                 FROM RentInvoices ri
                 CROSS APPLY dbo.InvoiceBalance(ri.Id, 0) b
-                WHERE ri.Id = @InvoiceId AND ri.LateFeeCharged > 0 AND ri.StatusId <> 6 AND b.RentBalance >= 0;
+                WHERE ri.Id = @InvoiceId AND ri.LateFeeCharged > 0 AND ri.StatusId <> 6 AND b.RentBalance >= 0
+                  -- a move-out settlement fixed this invoice's figures
+                  AND NOT EXISTS (SELECT 1 FROM MoveOutSettlementLines msl WHERE msl.InvoiceId = ri.Id);
 
                 IF @Fee IS NULL
-                BEGIN SELECT CAST(0 AS DECIMAL(18,2)) AS Fee; RETURN; END
+                BEGIN ROLLBACK; SELECT CAST(0 AS DECIMAL(18,2)) AS Fee; RETURN; END
 
                 UPDATE RentInvoices SET LateFeeCharged = 0, LateFeeChargedAt = NULL WHERE Id = @InvoiceId;
                 INSERT INTO InvoiceAudit(InvoiceId, Action, Amount, Reason, CreatedBy)
                 VALUES (@InvoiceId, 'LATE_FEE_REVERSED', @Fee, @Reason, @UserId);"
                         + RecalcInvoiceSql + @"
+                COMMIT;
                 SELECT @Fee AS Fee;";
 
             return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, new[]
@@ -512,20 +471,37 @@ namespace TRL_API.DAL
             return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters);
         }
 
-        public async Task<ApiResponse> BulkUpdateDueDateAsync(List<int> invoiceIds, DateTime newDueDate)
+        // Moves the due date of open invoices only: Unpaid or Partial, not part of a move-out settlement, and never to
+        // a date before the invoice date. Others in the list are skipped. Each change is written to InvoiceAudit
+        // (old -> new date), all in one transaction. Result: Updated and Requested counts.
+        public async Task<DataTable> BulkUpdateDueDateAsync(List<int> invoiceIds, DateTime newDueDate, int userId)
         {
-            var inParams = invoiceIds.Select((id, index) => $"@Id{index}").ToArray();
+            var ids = invoiceIds.Distinct().ToList();
+            var values = string.Join(", ", ids.Select((_, i) => $"(@Id{i})"));
             string query = $@"
-                UPDATE RentInvoices
-                SET DueDate = @NewDueDate
-                WHERE Id IN ({string.Join(", ", inParams)});";
+                SET XACT_ABORT ON;
+                DECLARE @T TABLE (Id INT PRIMARY KEY);
+                INSERT INTO @T (Id) VALUES {values};
+                DECLARE @Changed TABLE (Id INT, OldDue DATE);
+                BEGIN TRAN;
+                UPDATE ri SET DueDate = @NewDueDate
+                OUTPUT inserted.Id, deleted.DueDate INTO @Changed
+                FROM RentInvoices ri
+                JOIN @T t ON t.Id = ri.Id
+                WHERE ri.StatusId IN (2, 8)
+                  AND @NewDueDate >= CAST(ri.InvoiceDate AS DATE)
+                  AND NOT EXISTS (SELECT 1 FROM MoveOutSettlementLines msl WHERE msl.InvoiceId = ri.Id);
+                INSERT INTO InvoiceAudit (InvoiceId, Action, Reason, CreatedBy)
+                SELECT Id, 'DUE_DATE_CHANGED',
+                       CONCAT(N'Due date ', FORMAT(OldDue, 'dd MMM yyyy', 'en-US'), N' -> ', FORMAT(@NewDueDate, 'dd MMM yyyy', 'en-US')), @UserId
+                FROM @Changed WHERE OldDue IS NULL OR OldDue <> @NewDueDate;
+                COMMIT;
+                SELECT (SELECT COUNT(*) FROM @Changed) AS Updated, (SELECT COUNT(*) FROM @T) AS Requested;";
 
-            var parameters = invoiceIds
-                .Select((id, index) => new SqlParameter($"@Id{index}", id))
-                .ToList();
-            parameters.Add(new SqlParameter("@NewDueDate", newDueDate));
-
-            return await _dbHelper.ExecuteQueryAsync(query, parameters.ToArray());
+            var parameters = ids.Select((id, i) => new SqlParameter($"@Id{i}", id)).ToList();
+            parameters.Add(new SqlParameter("@NewDueDate", SqlDbType.Date) { Value = newDueDate.Date });
+            parameters.Add(new SqlParameter("@UserId", userId));
+            return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters.ToArray());
         }
 
         // =========================
@@ -644,7 +620,7 @@ namespace TRL_API.DAL
                 BEGIN ROLLBACK; SELECT 'BAD_TENANT' AS Result, CAST(NULL AS INT) AS Info; RETURN; END
 
                 IF @RelatedInvoiceId IS NOT NULL AND NOT EXISTS (
-                    SELECT 1 FROM RentInvoices ri JOIN @T x ON x.TenantId = ri.TenantId WHERE ri.Id = @RelatedInvoiceId)
+                    SELECT 1 FROM RentInvoices ri JOIN @T x ON x.TenantId = ri.TenantId WHERE ri.Id = @RelatedInvoiceId AND ri.StatusId <> 6)
                 BEGIN ROLLBACK; SELECT 'BAD_RELATED' AS Result, CAST(NULL AS INT) AS Info; RETURN; END
 
                 IF EXISTS (SELECT 1 FROM RentInvoices ri JOIN @T x ON x.TenantId = ri.TenantId
@@ -687,17 +663,25 @@ namespace TRL_API.DAL
         //Newly Added
         public async Task<DataTable> ChargeLateFeeAsync(int invoiceId)
         {
+            // One transaction; the invoice row is locked first (same order as payments), so a payment that closes the
+            // rent or waives the fee can't slip in between reading the fee and charging it.
             string query = @"
-                DECLARE @Fee DECIMAL(18,2);
+                SET XACT_ABORT ON;
+                DECLARE @Fee DECIMAL(18,2), @Locked INT;
+                BEGIN TRAN;
+                SELECT @Locked = Id FROM RentInvoices WITH (UPDLOCK, HOLDLOCK) WHERE Id = @InvoiceId;
                 -- The fee that applies now (dbo.InvoiceBalance: overdue, rent still owed, not waived, not yet charged).
                 -- Cancelled invoices are never charged.
                 SELECT @Fee = b.OpenLateFee
                 FROM RentInvoices ri
                 CROSS APPLY dbo.InvoiceBalance(ri.Id, 0) b
-                WHERE ri.Id = @InvoiceId AND ri.StatusId <> 6;
+                WHERE ri.Id = @InvoiceId AND ri.StatusId <> 6
+                  -- a move-out settlement fixed this invoice's figures
+                  AND NOT EXISTS (SELECT 1 FROM MoveOutSettlementLines msl WHERE msl.InvoiceId = ri.Id);
 
                 IF ISNULL(@Fee,0) <= 0
                 BEGIN
+                    ROLLBACK;
                     SELECT CAST(0 AS DECIMAL(18,2)) AS Fee;
                     RETURN;
                 END
@@ -709,6 +693,7 @@ namespace TRL_API.DAL
                 SET @Charged = @@ROWCOUNT;"
                         // Same pending/overpaid/status formula as payments and reversals
                         + RecalcInvoiceSql + @"
+                COMMIT;
                 SELECT CASE WHEN @Charged = 1 THEN @Fee ELSE CAST(0 AS DECIMAL(18,2)) END AS Fee;";
 
             return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, new[] { new SqlParameter("@InvoiceId", invoiceId) });

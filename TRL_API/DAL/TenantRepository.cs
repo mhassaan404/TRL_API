@@ -1,6 +1,7 @@
 ﻿using Microsoft.Data.SqlClient;
 using System.Data;
 using TRL_API.Data;
+using TRL_API.Helpers;
 using TRL_API.Models;
 
 namespace TRL_API.DAL
@@ -28,7 +29,7 @@ namespace TRL_API.DAL
             if (tenant.IsActive == true)
                 tenant.MoveOutDate = null;
             else
-                tenant.MoveOutDate = DateTime.UtcNow;
+                tenant.MoveOutDate = BusinessDate.Today;
 
             string query = @"
                 INSERT INTO [dbo].[Tenants]
@@ -43,12 +44,13 @@ namespace TRL_API.DAL
                 new SqlParameter("@ContactPerson", tenant.ContactPerson ?? (object)DBNull.Value),
                 new SqlParameter("@CnicNtn", tenant.CnicNtn ?? (object)DBNull.Value),
                 new SqlParameter("@Address", tenant.Address ?? (object)DBNull.Value),
-                new SqlParameter("@BuildingId", tenant.BuildingId == 0 ? (object)DBNull.Value : tenant.BuildingId),
-                new SqlParameter("@FloorId", tenant.FloorId == 0 ? (object)DBNull.Value : tenant.FloorId),
-                new SqlParameter("@UnitId", tenant.UnitId == 0 ? (object)DBNull.Value : tenant.UnitId),
+                // Unit and rent are set by leases only (Lease Management), never by the tenant form
+                new SqlParameter("@BuildingId", DBNull.Value),
+                new SqlParameter("@FloorId", DBNull.Value),
+                new SqlParameter("@UnitId", DBNull.Value),
                 new SqlParameter("@Contact", tenant.Contact ?? (object)DBNull.Value),
                 new SqlParameter("@Email", tenant.Email ?? (object)DBNull.Value),
-                new SqlParameter("@MonthlyRent", tenant.MonthlyRent is null or 0 ? (object)DBNull.Value : tenant.MonthlyRent),
+                new SqlParameter("@MonthlyRent", DBNull.Value),
                 new SqlParameter("@MoveOutDate", tenant.MoveOutDate ?? (object)DBNull.Value),
                 new SqlParameter("@CityId", tenant.CityId == 0 ? (object)DBNull.Value : tenant.CityId),
                 new SqlParameter("@CreatedBy", tenant.CreatedBy == 0 ? (object)DBNull.Value : tenant.CreatedBy),
@@ -62,6 +64,9 @@ namespace TRL_API.DAL
         public async Task<ApiResponse> UpdateTenantAsync(Tenants tenant)
         {
             string query = @"
+            DECLARE @Reactivated BIT = CASE WHEN @IsActive = 1
+                AND EXISTS (SELECT 1 FROM Tenants WHERE TenantId = @TenantId AND ISNULL(IsActive, 0) = 0)
+                AND NOT EXISTS (SELECT 1 FROM TenantLeases WHERE TenantId = @TenantId AND IsActive = 1) THEN 1 ELSE 0 END;
             UPDATE [dbo].[Tenants]
             SET
                 Name = @Name,
@@ -73,13 +78,19 @@ namespace TRL_API.DAL
                 Email = @Email,
                 -- Set only when the tenant goes from active to inactive; kept on later edits; cleared on reactivation
                 MoveOutDate = CASE WHEN @IsActive = 1 THEN NULL
-                                   WHEN ISNULL(IsActive, 0) = 1 OR MoveOutDate IS NULL THEN GETUTCDATE()
+                                   WHEN ISNULL(IsActive, 0) = 1 OR MoveOutDate IS NULL THEN dbo.BusinessToday()
                                    ELSE MoveOutDate END,
                 -- The tenant form no longer has a city: keep the stored one unless a city is sent
                 CityId = COALESCE(@CityId, CityId),
                 UpdatedBy = @UpdatedBy,
                 UpdatedAt = GETUTCDATE(),
                 Notes=@Notes,
+                -- Reactivating a moved-out tenant with no active lease: forget the old unit and rent (they belong to the
+                -- ended tenancy), so that unit doesn't show as occupied. A lease sets them again.
+                UnitId      = CASE WHEN @Reactivated = 1 THEN NULL ELSE UnitId END,
+                FloorId     = CASE WHEN @Reactivated = 1 THEN NULL ELSE FloorId END,
+                BuildingId  = CASE WHEN @Reactivated = 1 THEN NULL ELSE BuildingId END,
+                MonthlyRent = CASE WHEN @Reactivated = 1 THEN NULL ELSE MonthlyRent END,
                 IsActive = @IsActive
             WHERE TenantId = @TenantId AND IsDeleted = 0";
 
@@ -103,23 +114,39 @@ namespace TRL_API.DAL
             return await _dbHelper.ExecuteQueryAsync(query, parameters);
         }
 
-        public async Task<ApiResponse> DeleteTenantAsync(int tenantId, int userId)
+        // Soft delete: keeps the tenant's invoices/payments intact. The tenant is also moved out so it stops being
+        // invoiced and frees its unit. Only when nothing is left to settle: no active lease, no money owed either way
+        // on an invoice (incl. a late fee building up), no security deposit still held. The tenant row is locked first.
+        // Result: OK, NOT_FOUND, HAS_LEASE, OPEN_BALANCE or DEPOSIT_HELD.
+        public async Task<string> DeleteTenantAsync(int tenantId, int userId)
         {
-            // Soft delete: keeps the tenant's invoices/payments intact. The tenant is also moved out so it
-            // stops being invoiced and frees its unit.
             string query = @"
-                UPDATE [dbo].[Tenants]
-                SET IsDeleted = 1, IsActive = 0, MoveOutDate = ISNULL(MoveOutDate, GETUTCDATE()),
-                    UpdatedBy = @UpdatedBy, UpdatedAt = GETUTCDATE()
-                WHERE TenantId = @TenantId AND IsDeleted = 0";
+                SET XACT_ABORT ON;
+                DECLARE @r VARCHAR(20), @Found INT;
+                BEGIN TRAN;
+                SELECT @Found = TenantId FROM Tenants WITH (UPDLOCK, HOLDLOCK) WHERE TenantId = @TenantId AND IsDeleted = 0;
+                IF @Found IS NULL SET @r = 'NOT_FOUND';
+                ELSE IF EXISTS (SELECT 1 FROM TenantLeases WHERE TenantId = @TenantId AND IsActive = 1) SET @r = 'HAS_LEASE';
+                ELSE IF EXISTS (SELECT 1 FROM RentInvoices ri CROSS APPLY dbo.InvoiceBalance(ri.Id, 0) b
+                                WHERE ri.TenantId = @TenantId AND ri.StatusId <> 6 AND b.Balance + b.OpenLateFee <> 0) SET @r = 'OPEN_BALANCE';
+                ELSE IF (SELECT ISNULL(SUM(Amount), 0) FROM SecurityDeposits WHERE TenantId = @TenantId) > 0 SET @r = 'DEPOSIT_HELD';
+                ELSE
+                BEGIN
+                    UPDATE Tenants
+                    SET IsDeleted = 1, IsActive = 0, MoveOutDate = ISNULL(MoveOutDate, dbo.BusinessToday()),
+                        UpdatedBy = @UpdatedBy, UpdatedAt = GETUTCDATE()
+                    WHERE TenantId = @TenantId;
+                    SET @r = 'OK';
+                END
+                COMMIT;
+                SELECT @r AS Result;";
 
-            var parameters = new[]
+            var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query, new[]
             {
                 new SqlParameter("@TenantId", tenantId),
                 new SqlParameter("@UpdatedBy", userId),
-            };
-
-            return await _dbHelper.ExecuteQueryAsync(query, parameters);
+            });
+            return dt.Rows[0]["Result"].ToString()!;
         }
 
         public async Task<bool> HasActiveLeaseAsync(int tenantId)

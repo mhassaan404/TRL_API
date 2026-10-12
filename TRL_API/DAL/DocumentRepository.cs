@@ -68,7 +68,7 @@ namespace TRL_API.DAL
                        t.Address AS TenantAddress,
                        b.BuildingName, b.Address AS BuildingAddress, f.FloorNumber, u.UnitNumber,
                        bal.Paid, bal.Disc AS Discount, bal.Waived AS LateFeeWaived, bal.OpenLateFee, bal.Balance,
-                       CAST(GETUTCDATE() AS DATE) AS AsOfDate
+                       dbo.BusinessToday() AS AsOfDate
                 FROM RentInvoices ri
                 INNER JOIN Tenants t ON t.TenantId = ri.TenantId
                 LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)

@@ -8,8 +8,7 @@ namespace TRL_API.DAL
     {
         Task<DataTable> GetAllAsync();
         Task<DataTable> GetByTenantAsync(int tenantId);
-        Task<DateTime?> GetOverlappingBilledThroughAsync(int unitId, DateTime startDate);
-        Task<ApiResponse> CreateAsync(Lease lease, int userId);
+        Task<DataTable> CreateAsync(Lease lease, int userId);
         Task<ApiResponse> RenewAsync(RenewLeaseRequest req, int userId);
         Task<ApiResponse> TerminateAsync(TerminateLeaseRequest req, DateTime moveOutDate, int userId);
         Task<ApiResponse> CancelRenewalAsync(int leaseId, int userId);

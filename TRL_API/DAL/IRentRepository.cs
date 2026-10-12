@@ -12,8 +12,6 @@ namespace TRL_API.DAL
         Task<DataTable> GetInvoicesByTenantAsync(int tenantId);
         Task<DataTable> GetPaymentHistoryByIdAsync(int invoiceId);
         Task<DataTable> GetUnpaidInvoiceByTenant(int tenantId);
-        Task<string?> ValidateAdjustmentAsync(Payments p, SqlConnection conn, SqlTransaction tx);
-        Task<ApiResponse> CreatePaymentAdjustmentAsync(Payments payment, int userId, SqlConnection conn, SqlTransaction transaction);
         Task<ApiResponse> CreateRentAsync(Payments payment, int userId, SqlConnection conn, SqlTransaction transaction);
         Task<int> GetLatestPaymentIdAsync(int invoiceId, int userId, SqlConnection conn, SqlTransaction transaction);
         Task<ApiResponse> RecalcInvoiceAsync(int invoiceId, SqlConnection conn, SqlTransaction transaction);
@@ -25,7 +23,7 @@ namespace TRL_API.DAL
         Task<DataTable> GetRentCollectionAsync();
         Task<DataTable> GetTenantsWithRent();
         Task<DataTable> GetPaymentHistoryAsync(int invoiceId);
-        Task<ApiResponse> BulkUpdateDueDateAsync(List<int> invoiceIds, DateTime newDueDate);
+        Task<DataTable> BulkUpdateDueDateAsync(List<int> invoiceIds, DateTime newDueDate, int userId);
         Task<DataTable> GetActiveTenantsList();
         Task<DataTable> GetLeaseChargesForMonth(int month, int year);
         Task<DataTable> GetTenantNamesAsync();

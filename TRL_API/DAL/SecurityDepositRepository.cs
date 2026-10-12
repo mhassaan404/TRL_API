@@ -15,13 +15,13 @@ namespace TRL_API.DAL
         // A lease counts as current when it is active (running or starting later) or renewed with its term still
         // running (same rule as Lease Management). Today = server date, like the lease pages.
         private const string CurrentLeaseSql =
-            "(l.IsActive = 1 OR (l.TerminationReason = 'Renewed' AND l.BilledThrough >= CAST(GETDATE() AS DATE)))";
+            "(l.IsActive = 1 OR (l.TerminationReason = 'Renewed' AND l.BilledThrough >= dbo.BusinessToday()))";
 
         // One row per tenancy that has a current lease, or whose lease has ended while a deposit is still held.
         // LeaseId = the lease in force today (else the one starting next); ended tenancies show their last lease.
         public async Task<DataTable> GetTenanciesAsync() =>
             await _dbHelper.ExecuteQueryReturnDataTableAsync($@"
-                DECLARE @Today DATE = CAST(GETDATE() AS DATE);
+                DECLARE @Today DATE = dbo.BusinessToday();
                 ;WITH Cur AS (
                     SELECT l.TenantId, l.UnitId, l.LeaseId, l.StartDate, l.EndDate, l.RentAmount,
                            ROW_NUMBER() OVER (PARTITION BY l.TenantId, l.UnitId

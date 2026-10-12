@@ -10,6 +10,6 @@ namespace TRL_API.BLL
         Task<DataTable> GetHistoryAsync();
         Task<(DataTable Invoice, DataTable Payments, DataTable Events, DataTable Charges)> GetInvoiceDetailsAsync(int invoiceId);
         Task<ApiResponse> CancelInvoice(int invoiceid, string? reason, int userId);
-        Task<ApiResponse> ReinstateInvoice(int invoiceid);
+        Task<ApiResponse> ReinstateInvoice(int invoiceid, int userId);
     }
 }

@@ -110,6 +110,8 @@ namespace TRL_API.Tests
             var reverse = type.GetMethod(nameof(RentController.ReversePayment))!;
             Assert.Equal("ReversePayment", reverse.GetCustomAttribute<HttpPostAttribute>()?.Template);
             Assert.Null(type.GetMethod("UpdatePayments"));
+            Assert.Null(type.GetMethod("CreatePaymentAdjustment")); // wrong payments are reversed, not adjusted
+            Assert.Null(typeof(IRentService).GetMethod("CreatePaymentAdjustmentAsync"));
             Assert.Null(typeof(IRentService).GetMethod("UpdatePaymentsAsync"));
             Assert.Null(typeof(IRentRepository).GetMethod("UpdatePaymentAsync"));
         }

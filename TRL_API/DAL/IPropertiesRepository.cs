@@ -16,12 +16,13 @@ namespace TRL_API.DAL
         Task<DataTable> GetBuildingTypes();
         Task<ApiResponse> SaveBuilding(string? buildingName, int cityId, int typeId, string? address);
         Task<ApiResponse> UpdateBuilding(int buildingId, string? buildingName, int cityId, int typeId, string? address);
-        Task<ApiResponse> DeleteBuilding(int buildingId);
+        Task<string> DeleteBuilding(int buildingId);
         Task<ApiResponse> SaveFloor(int buildingId, string floorNumber);
         Task<ApiResponse> UpdateFloor(int floorId, string floorNumber);
-        Task<ApiResponse> DeleteFloor(int floorId);
-        Task<ApiResponse> SaveUnit(int floorId, int buildingId, string unitNumber, int statusId, double baseRent, string? note, string? propertyType);
-        Task<ApiResponse> UpdateUnit(int unitId, int floorId, int buildingId, string unitNumber, int statusId, double baseRent, string? note, string? propertyType);
-        Task<ApiResponse> DeleteUnit(int unitId);
+        Task<string> DeleteFloor(int floorId);
+        Task<bool> FloorBelongsToBuildingAsync(int floorId, int buildingId);
+        Task<ApiResponse> SaveUnit(int floorId, int buildingId, string unitNumber, int statusId, decimal baseRent, string? note, string? propertyType);
+        Task<ApiResponse> UpdateUnit(int unitId, int floorId, int buildingId, string unitNumber, int statusId, decimal baseRent, string? note, string? propertyType);
+        Task<string> DeleteUnit(int unitId);
     }
 }

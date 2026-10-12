@@ -19,7 +19,7 @@ namespace TRL_API.DAL
 
         // Same "current lease" rule as Lease Management and Security Deposits
         private const string CurrentLeaseExists = @"EXISTS (SELECT 1 FROM TenantLeases cl WHERE cl.TenantId = @TenantId AND cl.UnitId = @UnitId
-                  AND (cl.IsActive = 1 OR (cl.TerminationReason = 'Renewed' AND cl.BilledThrough >= CAST(GETDATE() AS DATE))))";
+                  AND (cl.IsActive = 1 OR (cl.TerminationReason = 'Renewed' AND cl.BilledThrough >= dbo.BusinessToday())))";
 
         // The tenancy's last real lease (cancelled leases never ran, so they are skipped)
         private const string LastLeaseSql = @"(SELECT TOP 1 ll.LeaseId FROM TenantLeases ll WHERE ll.TenantId = @TenantId AND ll.UnitId = @UnitId
@@ -64,7 +64,7 @@ namespace TRL_API.DAL
                                  WHERE ri.TenantId = x.TenantId AND ri.UnitId = x.UnitId AND ri.StatusId <> 6) o
                     OUTER APPLY (SELECT SUM(Amount) AS Held FROM SecurityDeposits sd WHERE sd.TenantId = x.TenantId AND sd.UnitId = x.UnitId) d
                     WHERE NOT EXISTS (SELECT 1 FROM TenantLeases cl WHERE cl.TenantId = x.TenantId AND cl.UnitId = x.UnitId
-                                        AND (cl.IsActive = 1 OR (cl.TerminationReason = 'Renewed' AND cl.BilledThrough >= CAST(GETDATE() AS DATE))))
+                                        AND (cl.IsActive = 1 OR (cl.TerminationReason = 'Renewed' AND cl.BilledThrough >= dbo.BusinessToday())))
                       AND NOT EXISTS (SELECT 1 FROM MoveOutSettlements s WHERE s.LeaseId = last.LeaseId)
                 )
                 SELECT X.*, t.Name AS TenantName, t.Contact, b.BuildingName, f.FloorNumber, u.UnitNumber
@@ -74,7 +74,7 @@ namespace TRL_API.DAL
                 LEFT JOIN Floors f ON f.FloorId = u.FloorId
                 LEFT JOIN Buildings b ON b.BuildingId = f.BuildingId
                 WHERE X.Outstanding <> 0 OR X.Credit <> 0 OR X.Held <> 0
-                   OR ISNULL(X.BilledThrough, X.EndDate) >= DATEADD(YEAR, -1, CAST(GETDATE() AS DATE))
+                   OR ISNULL(X.BilledThrough, X.EndDate) >= DATEADD(YEAR, -1, dbo.BusinessToday())
                 ORDER BY ISNULL(X.BilledThrough, X.EndDate) DESC, t.Name;");
 
         public async Task<DataTable> GetSettlementsAsync() =>
@@ -103,7 +103,7 @@ namespace TRL_API.DAL
                        (SELECT s.Id FROM MoveOutSettlements s WHERE s.LeaseId = @LeaseId) AS ExistingSettlementId,
                        ISNULL((SELECT SUM(Amount) FROM SecurityDeposits WHERE TenantId = @TenantId AND UnitId = @UnitId), 0) AS Held,
                        (SELECT AgreedAmount FROM SecurityDepositTerms WHERE TenantId = @TenantId AND UnitId = @UnitId) AS AgreedDeposit,
-                       CAST(GETDATE() AS DATE) AS Today
+                       dbo.BusinessToday() AS Today
                 FROM Tenants t
                 CROSS JOIN Units u
                 LEFT JOIN Floors f ON f.FloorId = u.FloorId

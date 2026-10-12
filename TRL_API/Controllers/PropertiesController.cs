@@ -159,7 +159,7 @@ namespace TRL_API.Controllers
             public string? floorNumber { get; set; } // text: "G", "1", "Mezzanine"
             public string? unitNumber { get; set; } // text: "101", "B1", "A-101"
             public int statusId { get; set; }
-            public double baseRent { get; set; }
+            public decimal baseRent { get; set; }
             public string? note { get; set; }
             public string? address { get; set; }
             public string? propertyType { get; set; }

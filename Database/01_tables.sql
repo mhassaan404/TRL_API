@@ -283,7 +283,7 @@ GO
 CREATE TABLE [dbo].[Payments](
 	[Id] [int] IDENTITY(1,1) NOT NULL,
 	[TenantId] [int] NOT NULL,
-	[PaymentAmount] [decimal](10, 2) NOT NULL,
+	[PaymentAmount] [decimal](18, 2) NOT NULL,
 	[PaymentDate] [datetime] NULL,
 	[RentInvoiceId] [int] NULL,
 	[PaymentMethod] [varchar](150) NULL,

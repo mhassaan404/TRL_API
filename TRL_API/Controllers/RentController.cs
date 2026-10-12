@@ -116,24 +116,8 @@ namespace TRL_API.Controllers
 
         public class ReversePaymentRequest { public int PaymentId { get; set; } public string? Reason { get; set; } }
 
-        // Payments
-        [Authorize(Roles = "Admin")]
-        [HttpPost("CreatePaymentAdjustment")]
-        public async Task<IActionResult> CreatePaymentAdjustment(Payments payments)
-        {
-            if (payments == null || payments.RentInvoiceId == 0)
-            {
-                return Ok(new ApiResponse
-                {
-                    IsSuccess = false,
-                    ErrorMessage = "Invalid input"
-                });
-            }
-
-            int userId = User.GetUserId();
-            var response = await _service.CreatePaymentAdjustmentAsync(payments, userId);
-            return Ok(response);
-        }
+        // Adjustments (unlinked negative payments) are no longer created: a wrong payment is reversed instead
+        // (ReversePayment). Existing adjustment rows stay and are shown as before.
 
         [HttpGet("GetRentCollection")]
         public async Task<IActionResult> GetRentCollection()
@@ -166,11 +150,10 @@ namespace TRL_API.Controllers
         [HttpPut("BulkUpdateDueDate")]
         public async Task<IActionResult> BulkUpdateDueDate([FromBody] BulkDueDateUpdateRequest request)
         {
-            if (request.InvoiceIds == null || request.InvoiceIds.Count == 0)
-                return Ok(new ApiResponse { IsSuccess = false, ErrorMessage = "Invoice list cannot be empty." });
-
-            var response = await _service.BulkUpdateDueDateAsync(request.InvoiceIds, request.NewDueDate);
-            return Ok(response);
+            if (request == null)
+                return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "Invalid input" });
+            var response = await _service.BulkUpdateDueDateAsync(request.InvoiceIds, request.NewDueDate, User.GetUserId());
+            return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
 
         // For populating the tenant multiselect in Generate Invoices / Add Extra Charge

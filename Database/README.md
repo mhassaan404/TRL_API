@@ -59,6 +59,17 @@ earlier migrations after checking their changes were present.
    only *record* the migrations. Old migrations are **not** safe to replay on the newer schema
    (e.g. `2026-09-29d` recreates an older `InvoiceBalance`), so they must never be re-run on an up-to-date database.
 
+**Rollback scripts** live in `rollback/` (never in `migrations/`, so `TRL_Tools migrate` can't run them). Use one only
+in an emergency and together with redeploying an API whose `SchemaVersion.Required` is the previous migration.
+
+**Rules the database enforces** (`2026-10-12c_db_constraints`): invoices must belong to an existing tenant and status
+(StatusId NOT NULL), audit rows to an existing invoice; invoice rent and charged late fee are never negative, nor the
+late-fee terms; charge types and payment methods must be known values (`PaymentMethod` may be NULL: older
+discount/waiver-only rows); lease rent > 0 and tenure ≥ 1 month; refresh tokens are unique. Deliberately not enforced,
+because older rows legitimately break them: a sign rule on payments (old adjustments), discount % range, the cached
+`PendingAmount`/`OverPaidAmount` columns, `DueDate >= InvoiceDate`. `RentPayments`, `InvoiceStatus` and
+`vw_UnitOccupancy` are unused but kept for now.
+
 ## Schema files
 
 Recreate a client database from scratch (SQL Server 2016+) – normally done by `TRL_Tools provision`:

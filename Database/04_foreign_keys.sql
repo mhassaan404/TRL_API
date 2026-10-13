@@ -19,6 +19,12 @@ GO
 ALTER TABLE [dbo].[Floors] CHECK CONSTRAINT [FK_Floors_Buildings]
 GO
 
+ALTER TABLE [dbo].[InvoiceAudit]  WITH CHECK ADD  CONSTRAINT [FK_InvoiceAudit_Invoice] FOREIGN KEY([InvoiceId])
+REFERENCES [dbo].[RentInvoices] ([Id])
+GO
+ALTER TABLE [dbo].[InvoiceAudit] CHECK CONSTRAINT [FK_InvoiceAudit_Invoice]
+GO
+
 ALTER TABLE [dbo].[MaintenanceJobs]  WITH CHECK ADD  CONSTRAINT [FK_MaintenanceJobs_Building] FOREIGN KEY([BuildingId])
 REFERENCES [dbo].[Buildings] ([BuildingId])
 GO
@@ -85,6 +91,18 @@ ALTER TABLE [dbo].[RentInvoices]  WITH CHECK ADD  CONSTRAINT [FK_RentInvoices_Re
 REFERENCES [dbo].[RentInvoices] ([Id])
 GO
 ALTER TABLE [dbo].[RentInvoices] CHECK CONSTRAINT [FK_RentInvoices_RelatedInvoice]
+GO
+
+ALTER TABLE [dbo].[RentInvoices]  WITH CHECK ADD  CONSTRAINT [FK_RentInvoices_Status] FOREIGN KEY([StatusId])
+REFERENCES [dbo].[StatusList] ([StatusId])
+GO
+ALTER TABLE [dbo].[RentInvoices] CHECK CONSTRAINT [FK_RentInvoices_Status]
+GO
+
+ALTER TABLE [dbo].[RentInvoices]  WITH CHECK ADD  CONSTRAINT [FK_RentInvoices_Tenant] FOREIGN KEY([TenantId])
+REFERENCES [dbo].[Tenants] ([TenantId])
+GO
+ALTER TABLE [dbo].[RentInvoices] CHECK CONSTRAINT [FK_RentInvoices_Tenant]
 GO
 
 ALTER TABLE [dbo].[RentInvoices]  WITH CHECK ADD  CONSTRAINT [FK_RentInvoices_TenantLeases] FOREIGN KEY([LeaseId])

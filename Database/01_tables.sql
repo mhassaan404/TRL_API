@@ -127,6 +127,11 @@ PRIMARY KEY CLUSTERED
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
+CREATE NONCLUSTERED INDEX [IX_InvoiceAudit_Invoice] ON [dbo].[InvoiceAudit]
+(
+	[InvoiceId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+GO
 ALTER TABLE [dbo].[InvoiceAudit] ADD  DEFAULT (getdate()) FOR [CreatedAt]
 GO
 
@@ -315,12 +320,21 @@ ALTER TABLE [dbo].[Payments] ADD  CONSTRAINT [DF__Payments__Discou__2DB1C7EE]  D
 GO
 ALTER TABLE [dbo].[Payments] ADD  CONSTRAINT [DF__Payments__LateFe__2EA5EC27]  DEFAULT ((0)) FOR [IsLateFeeWaived]
 GO
+CREATE NONCLUSTERED INDEX [IX_Payments_Tenant] ON [dbo].[Payments]
+(
+	[TenantId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+GO
 CREATE UNIQUE NONCLUSTERED INDEX [UX_Payments_ReversalOf] ON [dbo].[Payments]
 (
 	[ReversalOfPaymentId] ASC
 )
 WHERE ([ReversalOfPaymentId] IS NOT NULL)
 WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+GO
+ALTER TABLE [dbo].[Payments]  WITH CHECK ADD  CONSTRAINT [CK_Payments_Method] CHECK  (([PaymentMethod]='Credit to Deposit' OR [PaymentMethod]='Security Deposit' OR [PaymentMethod]='Adjustment' OR [PaymentMethod]='Online' OR [PaymentMethod]='Cheque' OR [PaymentMethod]='Bank Transfer' OR [PaymentMethod]='Cash'))
+GO
+ALTER TABLE [dbo].[Payments] CHECK CONSTRAINT [CK_Payments_Method]
 GO
 ALTER TABLE [dbo].[Payments]  WITH CHECK ADD  CONSTRAINT [CK_Payments_Reversal] CHECK  (([ReversalOfPaymentId] IS NULL OR [ReversalOfPaymentId]<>[Id] AND [PaymentAmount]<=(0) AND [DiscountAmount]<=(0) AND [IsLateFeeWaived]=(0)))
 GO
@@ -344,6 +358,18 @@ PRIMARY KEY CLUSTERED
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
+CREATE NONCLUSTERED INDEX [IX_RefreshTokens_User] ON [dbo].[RefreshTokens]
+(
+	[UserId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+GO
+SET ANSI_PADDING ON
+GO
+CREATE UNIQUE NONCLUSTERED INDEX [UX_RefreshTokens_Token] ON [dbo].[RefreshTokens]
+(
+	[Token] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+GO
 ALTER TABLE [dbo].[RefreshTokens] ADD  DEFAULT ((0)) FOR [IsRevoked]
 GO
 
@@ -358,7 +384,7 @@ CREATE TABLE [dbo].[RentInvoices](
 	[PendingAmount] [decimal](18, 2) NOT NULL,
 	[CreatedAt] [datetime] NOT NULL,
 	[DueDate] [date] NULL,
-	[StatusId] [int] NULL,
+	[StatusId] [int] NOT NULL,
 	[OverPaidAmount] [decimal](18, 2) NULL,
 	[InvoiceDate] [date] NULL,
 	[DiscountAmount] [decimal](18, 2) NOT NULL,
@@ -393,11 +419,6 @@ CREATE NONCLUSTERED INDEX [IX_RentInvoices_Tenant] ON [dbo].[RentInvoices]
 	[StatusId] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
 GO
-CREATE NONCLUSTERED INDEX [IX_RentInvoices_TenantId] ON [dbo].[RentInvoices]
-(
-	[TenantId] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
-GO
 SET ARITHABORT ON
 SET CONCAT_NULL_YIELDS_NULL ON
 SET QUOTED_IDENTIFIER ON
@@ -423,6 +444,18 @@ GO
 ALTER TABLE [dbo].[RentInvoices] ADD  DEFAULT ((0)) FOR [IsLateFeeWaived]
 GO
 ALTER TABLE [dbo].[RentInvoices] ADD  CONSTRAINT [DF_RI_LFC]  DEFAULT ((0)) FOR [LateFeeCharged]
+GO
+ALTER TABLE [dbo].[RentInvoices]  WITH CHECK ADD  CONSTRAINT [CK_RentInvoices_Amounts] CHECK  (([TotalRent]>=(0) AND [LateFeeCharged]>=(0)))
+GO
+ALTER TABLE [dbo].[RentInvoices] CHECK CONSTRAINT [CK_RentInvoices_Amounts]
+GO
+ALTER TABLE [dbo].[RentInvoices]  WITH CHECK ADD  CONSTRAINT [CK_RentInvoices_ChargeType] CHECK  (([ChargeType] IS NULL OR ([ChargeType]=N'Security Deposit' OR [ChargeType]=N'Late Fine' OR [ChargeType]=N'Cleaning' OR [ChargeType]=N'Other' OR [ChargeType]=N'Rent Correction' OR [ChargeType]=N'Damage' OR [ChargeType]=N'Utility' OR [ChargeType]=N'Maintenance')))
+GO
+ALTER TABLE [dbo].[RentInvoices] CHECK CONSTRAINT [CK_RentInvoices_ChargeType]
+GO
+ALTER TABLE [dbo].[RentInvoices]  WITH CHECK ADD  CONSTRAINT [CK_RentInvoices_LateFeeTerms] CHECK  (([LateFeePerDay]>=(0) AND [LateFeeMaxMultiplier]>=(0)))
+GO
+ALTER TABLE [dbo].[RentInvoices] CHECK CONSTRAINT [CK_RentInvoices_LateFeeTerms]
 GO
 
 SET ANSI_NULLS ON
@@ -724,6 +757,10 @@ GO
 ALTER TABLE [dbo].[TenantLeases]  WITH CHECK ADD  CONSTRAINT [CK_TenantLeases_BilledThrough] CHECK  (([BilledThrough] IS NULL OR [BilledThrough]>=dateadd(day,(-1),[StartDate])))
 GO
 ALTER TABLE [dbo].[TenantLeases] CHECK CONSTRAINT [CK_TenantLeases_BilledThrough]
+GO
+ALTER TABLE [dbo].[TenantLeases]  WITH CHECK ADD  CONSTRAINT [CK_TenantLeases_Terms] CHECK  (([RentAmount]>(0) AND [TenureMonths]>=(1)))
+GO
+ALTER TABLE [dbo].[TenantLeases] CHECK CONSTRAINT [CK_TenantLeases_Terms]
 GO
 
 SET ANSI_NULLS ON

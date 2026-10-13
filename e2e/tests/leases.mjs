@@ -39,8 +39,12 @@ export default async ({ a }) => {
   ok(r.status === 400 && /Company or Individual/.test(errorText(r)), 'invalid tenant type refused', r.json)
   const tenants = (await a.get('/Tenant/GetTenants')).json
   ok(Array.isArray(tenants) && tenants.some((x) => x.tenantId === t.tenantId), 'tenant listed')
-  ok(one(db, `SELECT CONCAT(ISNULL(UnitId, 0), '|', ISNULL(MonthlyRent, 0)) FROM Tenants WHERE TenantId = ${t.tenantId}`) === '0|0.00',
-     'unit and rent sent with a new tenant are ignored (only a lease sets them)')
+  // The tenant list shows the unit and rent of the tenant's current lease (dbo.TenantCurrentLease)
+  const shown = async () => {
+    const row = ((await a.get('/Tenant/GetTenants')).json || []).find((x) => x.tenantId === t.tenantId) || {}
+    return `${row.unitId ?? 0}|${Number(row.monthlyRent ?? 0)}|${row.isActive}`
+  }
+  ok((await shown()).startsWith('0|0|'), 'unit and rent sent with a new tenant are ignored (only a lease gives them)', await shown())
 
   section('create a lease')
   const vacant = async () => ((await a.get('/Rent/GetVacantUnits')).json || []).map((u) => u.unitId)
@@ -54,7 +58,7 @@ export default async ({ a }) => {
   ok(r.status === 200, 'lease created', r.json)
   const leaseId = num(db, `SELECT MAX(LeaseId) FROM TenantLeases WHERE TenantId = ${t.tenantId}`)
   ok(one(db, `SELECT CONCAT(IsActive, '|', UnitId, '|', RentAmount) FROM TenantLeases WHERE LeaseId = ${leaseId}`) === `1|${t.unitIds[0]}|40000.00`, 'lease row active with the rent and unit')
-  ok(num(db, `SELECT UnitId FROM Tenants WHERE TenantId = ${t.tenantId}`) === t.unitIds[0], 'tenant now points at the unit')
+  ok((await shown()) === `${t.unitIds[0]}|40000|true`, "tenant list shows the lease's unit and rent", await shown())
   ok(!(await vacant()).includes(t.unitIds[0]), 'unit no longer vacant')
   r = await a.post('/Lease/Create', { tenantId: t.tenantId, unitId: t.unitIds[0], rentAmount: 40000, startDate: TODAY, tenureMonths: 12 })
   ok(r.status === 400, 'second active lease on the same unit refused', r.json)
@@ -76,11 +80,13 @@ export default async ({ a }) => {
   ok(renewal > leaseId && prevState[0] === '0' && prevState[1] === 'Renewed' && newState[0] === '1' && Number(newState[1]) === 45000,
      'old term marked Renewed, new term active at the new rent', { prevState, newState })
   ok(prevState[2] === addDays(newState[2], -1), 'old term billed through the day before the new term starts', { prevState, newState })
+  ok((await shown()) === `${t.unitIds[0]}|45000|true`, 'tenant list shows the renewed rent', await shown())
   r = await a.post('/Lease/CancelRenewal', { leaseId: renewal })
   ok(r.status === 200 && /Renewal cancelled/.test(r.json?.message), 'upcoming renewal cancelled', r.json)
   ok(one(db, `SELECT CONCAT(IsActive, '|', ISNULL(TerminationReason, '')) FROM TenantLeases WHERE LeaseId = ${renewal}`) === '0|Renewal cancelled' &&
      one(db, `SELECT CONCAT(IsActive, '|', ISNULL(CONVERT(varchar(10), BilledThrough, 23), 'NULL')) FROM TenantLeases WHERE LeaseId = ${leaseId}`) === '1|NULL',
      'renewal inactive, original lease active again')
+  ok((await shown()) === `${t.unitIds[0]}|40000|true`, 'tenant list shows the original rent again', await shown())
   r = await a.post('/Lease/CancelRenewal', { leaseId })
   ok(r.status === 400, 'a lease that is not a renewal cannot be "cancelled as renewal"', r.json)
 
@@ -98,9 +104,9 @@ export default async ({ a }) => {
   ok((await vacant()).includes(t.unitIds[0]), 'unit vacant again')
   const occupied = async (unitId) => ((await a.get('/Properties/GetProperties')).json || []).find((u) => u.unitId === unitId)?.isOccupied
   ok(num(db, `SELECT IsActive FROM Tenants WHERE TenantId = ${t.tenantId}`) === 0 && (await occupied(t.unitIds[0])) === false, 'tenant moved out, unit not occupied')
+  ok((await shown()) === `${t.unitIds[0]}|40000|false`, 'a moved-out tenant still shows the unit of their last lease', await shown())
   r = await a.put('/Tenant/Update', { tenantId: t.tenantId, name: t.name, tenantType: 'Individual', contact: '0300-1234567', isActive: true })
-  ok(r.status === 200 && one(db, `SELECT CONCAT(IsActive, '|', ISNULL(UnitId, 0)) FROM Tenants WHERE TenantId = ${t.tenantId}`) === '1|0',
-     'reactivating a tenant without a lease clears the old unit', r.json)
+  ok(r.status === 200 && (await shown()) === '0|0|true', 'reactivating a tenant without a lease shows no unit', await shown())
   ok((await occupied(t.unitIds[0])) === false, 'so the old unit does not show as occupied')
 
   section('cancel a lease made by mistake')

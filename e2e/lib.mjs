@@ -222,8 +222,9 @@ export const seed = (db, { units = 1, tenants = [], leases = [], invoices = [] }
   for (let i = 0; i < units; i++) {
     lines.push(`INSERT INTO Units (FloorId, BuildingId, UnitNumber, BaseRent) VALUES (@F, @B, ${q(`S${n}-${i + 1}`)}, 50000); INSERT INTO @U VALUES (${i}, SCOPE_IDENTITY());`)
   }
+  // A tenant's unit and rent come from their lease (dbo.TenantCurrentLease), so tenants are inserted without them
   tenants.forEach((t, i) => {
-    lines.push(`INSERT INTO Tenants (Name, UnitId, MonthlyRent, Contact) VALUES (${q(t.name)}, (SELECT id FROM @U WHERE i = ${t.unit ?? 0}), ${t.rent ?? 50000}, N'03000000000'); INSERT INTO @T VALUES (${i}, SCOPE_IDENTITY());`)
+    lines.push(`INSERT INTO Tenants (Name, Contact) VALUES (${q(t.name)}, N'03000000000'); INSERT INTO @T VALUES (${i}, SCOPE_IDENTITY());`)
   })
   leases.forEach((l, i) => {
     lines.push(`INSERT INTO TenantLeases (TenantId, UnitId, RentAmount, StartDate, TenureMonths, BilledThrough) VALUES ((SELECT id FROM @T WHERE i = ${l.tenant ?? 0}), (SELECT id FROM @U WHERE i = ${l.unit ?? 0}), ${l.rent ?? 50000}, '${l.start}', ${l.tenure ?? 12}, ${l.billedThrough ? `'${l.billedThrough}'` : 'NULL'}); INSERT INTO @L VALUES (${i}, SCOPE_IDENTITY());`)

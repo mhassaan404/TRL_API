@@ -11,6 +11,8 @@ namespace TRL_API.Data
         Task<ClientInfo?> GetByIdAsync(int clientId);
         // True when the client's database has the migration this API requires (SchemaVersion.Required)
         Task<bool> IsSchemaCurrentAsync(ClientInfo client);
+        // Every active client (not cached), for the health check
+        Task<IReadOnlyList<ClientInfo>> GetActiveClientsAsync();
     }
 
     // Reads the client catalog (ConnectionStrings:Catalog). Lookups are cached for a short time so every request can
@@ -58,17 +60,32 @@ namespace TRL_API.Data
             cmd.Parameters.AddWithValue("@Value", value);
             await con.OpenAsync();
             await using var r = await cmd.ExecuteReaderAsync();
-            ClientInfo? client = null;
-            if (await r.ReadAsync())
-            {
-                var connectionKey = r.GetString(4);
-                var connection = _configuration[$"ClientConnections:{connectionKey}"];
-                client = new ClientInfo(r.GetInt32(0), r.GetString(1), r.GetString(2), r.GetString(3), connectionKey,
-                    r.GetBoolean(5), string.IsNullOrWhiteSpace(connection) ? null : connection);
-                if (client.ConnectionString == null)
-                    _logger.LogError("Client {Code} has no connection string configured (ClientConnections:{Key}).", client.ClientCode, connectionKey);
-            }
+            var client = await r.ReadAsync() ? ReadClient(r) : null;
             _cache.Set(key, client, CacheFor);
+            return client;
+        }
+
+        public async Task<IReadOnlyList<ClientInfo>> GetActiveClientsAsync()
+        {
+            await using var con = new SqlConnection(_catalogConnection);
+            await using var cmd = new SqlCommand(
+                "SELECT ClientId, ClientCode, ClientName, DatabaseName, ConnectionKey, IsActive FROM dbo.Clients WHERE IsActive = 1", con);
+            await con.OpenAsync();
+            await using var r = await cmd.ExecuteReaderAsync();
+            var clients = new List<ClientInfo>();
+            while (await r.ReadAsync()) clients.Add(ReadClient(r));
+            return clients;
+        }
+
+        // Columns: ClientId, ClientCode, ClientName, DatabaseName, ConnectionKey, IsActive
+        private ClientInfo ReadClient(SqlDataReader r)
+        {
+            var connectionKey = r.GetString(4);
+            var connection = _configuration[$"ClientConnections:{connectionKey}"];
+            var client = new ClientInfo(r.GetInt32(0), r.GetString(1), r.GetString(2), r.GetString(3), connectionKey,
+                r.GetBoolean(5), string.IsNullOrWhiteSpace(connection) ? null : connection);
+            if (client.ConnectionString == null)
+                _logger.LogError("Client {Code} has no connection string configured (ClientConnections:{Key}).", client.ClientCode, connectionKey);
             return client;
         }
 

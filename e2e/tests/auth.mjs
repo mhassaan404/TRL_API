@@ -1,11 +1,14 @@
 // Login, refresh, logout, change password, Admin-only and active-user rules, CSRF, client isolation and the login
 // rate limit. Runs last: it changes client A's password and uses up the login rate limit (10 a minute per address).
-import { ADMIN_USER, CLIENT, DB, Session, area, errorText, newPassword, num, ok, section, sql } from '../lib.mjs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import path from 'node:path'
+import { ADMIN_USER, BASE, CLIENT, DB, OUT, Session, area, errorText, newPassword, num, ok, section, sql } from '../lib.mjs'
 
 export default async (ctx) => {
   area('auth')
   const { a, b } = ctx
   const anon = new Session('', '')
+  const originalPassword = ctx.password
 
   section('login')
   {
@@ -92,6 +95,38 @@ export default async (ctx) => {
     r = await new Session(CLIENT.a).post('/Auth/login', { clientCode: CLIENT.a, username: ADMIN_USER, password: next })
     ok(r.status === 200, 'new password works', r.json)
     ctx.password = next
+  }
+
+  section('security headers, health check, security log')
+  {
+    const wantHeaders = (h) => h.get('x-content-type-options') === 'nosniff' && h.get('x-frame-options') === 'DENY'
+      && h.get('referrer-policy') === 'no-referrer' && /frame-ancestors 'none'/.test(h.get('content-security-policy') || '')
+      && h.get('cache-control') === 'no-store'
+    let raw = await fetch(`${BASE}/Rent/GetTenants`)
+    ok(raw.status === 401 && wantHeaders(raw.headers), 'security headers on an error response (401)', Object.fromEntries(raw.headers))
+    raw = await fetch(`${BASE}/Lease/GetAll`, { headers: { Cookie: a.cookie } })
+    ok(raw.status === 200 && wantHeaders(raw.headers), 'security headers + no-store on tenant/lease data', Object.fromEntries(raw.headers))
+
+    raw = await fetch(`${BASE}/health`)
+    const health = await raw.json()
+    ok(raw.status === 200 && health.status === 'ok' && Object.keys(health).length === 1 && wantHeaders(raw.headers),
+      'health check: 200 {"status":"ok"} without login, nothing else revealed', health)
+
+    // The API writes warnings to e2e/.out/api/logs (its content root); everything above left security events there
+    const dir = path.join(OUT, 'api', 'logs')
+    const log = existsSync(dir)
+      ? readdirSync(dir).filter((f) => /^trl-\d{4}-\d{2}-\d{2}\.log$/.test(f)).map((f) => readFileSync(path.join(dir, f), 'utf8')).join('\n')
+      : ''
+    ok(new RegExp(`Login failed for ${CLIENT.a}/${ADMIN_USER} from .*wrong username or password`).test(log), 'failed login is in the log file', log.slice(-400))
+    ok(new RegExp(`Login failed for NOPE/${ADMIN_USER} from .*unknown or inactive client code`).test(log), 'unknown client code is in the log file')
+    ok(new RegExp(`Login refused for ${CLIENT.b}/${ADMIN_USER} from .*deactivated`).test(log)
+      && new RegExp(`Login refused for ${CLIENT.b}/${ADMIN_USER} from .*role Manager has no access`).test(log), 'deactivated and non-Admin logins are in the log file')
+    ok(new RegExp(`Session refresh refused for client ${CLIENT.a} from .*refresh token`).test(log), 'refused refresh token is in the log file')
+    ok(new RegExp(`Password change failed for ${CLIENT.a}/${ADMIN_USER} .*wrong current password`).test(log)
+      && new RegExp(`Password changed for ${CLIENT.a}/${ADMIN_USER} `).test(log), 'password change events are in the log file')
+    const secrets = ['wrong-password-1', 'wrong-1234', originalPassword, ctx.password]
+    ok(log.length > 0 && !secrets.some((s) => log.includes(s)) && !/eyJ[A-Za-z0-9_-]{20,}/.test(log) && !/refreshToken=/.test(log),
+      'no password, refresh token or JWT in the log file')
   }
 
   section('login rate limit')

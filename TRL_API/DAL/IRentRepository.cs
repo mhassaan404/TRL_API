@@ -18,7 +18,6 @@ namespace TRL_API.DAL
         Task<string?> ValidatePaymentAsync(Payments p, SqlConnection conn, SqlTransaction tx);
         Task<DataTable> ReversePaymentAsync(int paymentId, string reason, int userId);
         Task<DataTable> ReverseLateFeeAsync(int invoiceId, string reason, int userId);
-        Task<DataTable> GetOccupancyAsync();
         Task<DataTable> GetVacantUnitsAsync(int? includeUnitId);
         Task<DataTable> GetRentCollectionAsync();
         Task<DataTable> GetTenantsWithRent();

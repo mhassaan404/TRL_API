@@ -148,7 +148,6 @@ namespace TRL_API.BLL
             return new PaymentSubmitResponse { IsSuccess = true, Message = "Payment recorded successfully.", ReceiptIds = receiptIds };
         }
 
-        public async Task<DataTable> GetOccupancyAsync() => await _dal.GetOccupancyAsync();
         public async Task<DataTable> GetVacantUnitsAsync(int? includeUnitId) => await _dal.GetVacantUnitsAsync(includeUnitId);
 
         public async Task<ApiResponse> ReverseLateFeeAsync(int invoiceId, string reason, int userId)

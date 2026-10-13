@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using System.Text.Json;
@@ -13,6 +14,14 @@ using TRL_API.Models;
 using TRL_API.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Warnings and errors (unhandled errors, failed logins, misconfigured clients) also go to daily files under the app
+// folder, because the host keeps no console output: FileLogging:Path (default "logs"), FileLogging:KeepDays (30).
+// FileLogging:Path = "" turns it off. Request bodies, passwords, tokens and connection strings are never logged.
+var logPath = builder.Configuration["FileLogging:Path"] ?? "logs";
+if (logPath.Length > 0)
+    builder.Logging.AddProvider(new FileLoggerProvider(Path.Combine(builder.Environment.ContentRootPath, logPath),
+        builder.Configuration.GetValue("FileLogging:KeepDays", 30)));
 
 // Multi-client: one database per client. The catalog (ConnectionStrings:Catalog) lists the clients; each client's
 // connection string is in ClientConnections:<ConnectionKey>. The database for a request comes only from the signed
@@ -166,6 +175,29 @@ builder.Services.AddRateLimiter(options =>
 
 var app = builder.Build();
 
+// Security headers on every response (also errors): no MIME sniffing, never shown in a frame, no referrer, and API
+// data (rent, payments, tenant details) is never stored by browsers or proxies. Swagger (Development only) keeps
+// its own caching and scripts. HSTS (HTTPS only, not for localhost) outside Development.
+app.Use(async (context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        var headers = context.Response.Headers;
+        headers["X-Content-Type-Options"] = "nosniff";
+        headers["X-Frame-Options"] = "DENY";
+        headers["Referrer-Policy"] = "no-referrer";
+        if (!context.Request.Path.StartsWithSegments("/swagger"))
+        {
+            headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'";
+            headers.CacheControl = "no-store";
+        }
+        return Task.CompletedTask;
+    });
+    await next();
+});
+if (!app.Environment.IsDevelopment())
+    app.UseHsts();
+
 // Unhandled errors: log the details on the server, send the client a generic ApiResponse (never exception text).
 // CORS is applied again inside the handler because the error response is cleared, which drops the CORS headers.
 app.UseExceptionHandler(errorApp =>
@@ -186,9 +218,11 @@ app.UseExceptionHandler(errorApp =>
             return;
         }
 
-        app.Logger.LogError(error, "Unhandled error on {Method} {Path}", context.Request.Method, context.Request.Path);
+        // The reference is shown to the user and written in the log, so a reported error can be found in the log file
+        var reference = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+        app.Logger.LogError(error, "Unhandled error {Reference} on {Method} {Path}", reference, context.Request.Method, context.Request.Path);
 
-        const string message = "Something went wrong while processing your request. Please try again.";
+        var message = $"Something went wrong while processing your request. Please try again. (Reference: {reference})";
         context.Response.StatusCode = StatusCodes.Status500InternalServerError;
         await context.Response.WriteAsJsonAsync(new ApiResponse { IsSuccess = false, Message = message, ErrorMessage = message });
     });
@@ -227,6 +261,29 @@ app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+// Uptime monitoring: GET /api/health, no login and no details. 200 {"status":"ok"} when the catalog and every active
+// client database answer and are on the schema this API needs; otherwise 503 {"status":"unavailable"} and the reason
+// is logged. The answer is reused for 30 seconds, so calling it often can't put load on the databases.
+app.MapGet("/api/health", async (IClientCatalog catalog, IMemoryCache cache, ILogger<Program> logger) =>
+{
+    var healthy = await cache.GetOrCreateAsync("health-check", async entry =>
+    {
+        entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(30);
+        try
+        {
+            foreach (var client in await catalog.GetActiveClientsAsync())
+                if (!await catalog.IsSchemaCurrentAsync(client)) return false;  // logs which client and why
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Health check failed: the catalog or a client database could not be reached.");
+            return false;
+        }
+    });
+    return healthy ? Results.Ok(new { status = "ok" }) : Results.Json(new { status = "unavailable" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+});
 
 app.MapControllers();
 

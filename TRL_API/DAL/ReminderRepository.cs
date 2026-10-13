@@ -19,7 +19,7 @@ namespace TRL_API.DAL
                        bal.Balance, bal.OpenLateFee AS LateFee
                 FROM RentInvoices ri
                 INNER JOIN Tenants t ON ri.TenantId = t.TenantId
-                LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
+                LEFT JOIN Units u ON u.UnitId = COALESCE(ri.UnitId, (SELECT cl.UnitId FROM dbo.TenantCurrentLease(t.TenantId) cl))
                 LEFT JOIN Floors f ON u.FloorId = f.FloorId
                 LEFT JOIN Buildings bd ON f.BuildingId = bd.BuildingId
                 CROSS APPLY dbo.InvoiceBalance(ri.Id, 0) bal

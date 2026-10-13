@@ -15,7 +15,6 @@ namespace TRL_API.BLL
         Task<DataTable> GetPaymentHistoryAsync(int invoiceId);
         Task<object> GetUnpaidInvoicesByTenantAsync(int tenantId);
         Task<ApiResponse> SubmitPaymentsAsync(List<Payments> payments, int userId);
-        Task<DataTable> GetOccupancyAsync();
         Task<DataTable> GetVacantUnitsAsync(int? includeUnitId);
         Task<ApiResponse> ReverseLateFeeAsync(int invoiceId, string reason, int userId);
         Task<ApiResponse> CreateRentAsync(List<Payments> payments, int userId);

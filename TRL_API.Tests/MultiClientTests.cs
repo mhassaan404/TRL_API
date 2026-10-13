@@ -17,7 +17,7 @@ namespace TRL_API.Tests
             Assert.NotNull(dir);
             var newest = Directory.GetFiles(Path.Combine(dir!.FullName, "Database", "migrations"), "*.sql")
                 .Select(Path.GetFileNameWithoutExtension).OrderBy(n => n, StringComparer.Ordinal).Last();
-            Assert.Equal(newest, SchemaVersion.Required);
+            Assert.Equal(SchemaVersion.Required, newest);
         }
 
         [Fact]

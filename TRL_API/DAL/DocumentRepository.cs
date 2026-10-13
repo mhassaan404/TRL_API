@@ -42,7 +42,7 @@ namespace TRL_API.DAL
                 LEFT JOIN Users rvu ON rvu.UserId = rv.CreatedBy
                 INNER JOIN RentInvoices ri ON ri.Id = p.RentInvoiceId
                 INNER JOIN Tenants t ON t.TenantId = ri.TenantId
-                LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
+                LEFT JOIN Units u ON u.UnitId = COALESCE(ri.UnitId, (SELECT cl.UnitId FROM dbo.TenantCurrentLease(t.TenantId) cl))
                 LEFT JOIN Floors f ON f.FloorId = u.FloorId
                 LEFT JOIN Buildings b ON b.BuildingId = f.BuildingId
                 LEFT JOIN StatusList sl ON sl.StatusId = ri.StatusId
@@ -71,7 +71,7 @@ namespace TRL_API.DAL
                        dbo.BusinessToday() AS AsOfDate
                 FROM RentInvoices ri
                 INNER JOIN Tenants t ON t.TenantId = ri.TenantId
-                LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
+                LEFT JOIN Units u ON u.UnitId = COALESCE(ri.UnitId, (SELECT cl.UnitId FROM dbo.TenantCurrentLease(t.TenantId) cl))
                 LEFT JOIN Floors f ON f.FloorId = u.FloorId
                 LEFT JOIN Buildings b ON b.BuildingId = f.BuildingId
                 LEFT JOIN StatusList sl ON sl.StatusId = ri.StatusId

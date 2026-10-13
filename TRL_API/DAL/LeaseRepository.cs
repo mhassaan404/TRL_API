@@ -96,10 +96,8 @@ namespace TRL_API.DAL
                 INSERT INTO TenantLeases (TenantId, UnitId, RentAmount, StartDate, TenureMonths, IsActive, CreatedBy)
                 VALUES (@TenantId, @UnitId, @RentAmount, @StartDate, @TenureMonths, 1, @CreatedBy);
 
-                UPDATE t SET UnitId = u.UnitId, FloorId = u.FloorId, BuildingId = u.BuildingId, MonthlyRent = @RentAmount,
-                             IsActive = 1, MoveOutDate = NULL
-                FROM Tenants t JOIN Units u ON u.UnitId = @UnitId
-                WHERE t.TenantId = @TenantId;
+                -- The tenant rents again (their unit and rent come from the lease: dbo.TenantCurrentLease)
+                UPDATE Tenants SET IsActive = 1, MoveOutDate = NULL WHERE TenantId = @TenantId;
                 COMMIT;
                 SELECT 'OK' AS Result, CAST(NULL AS DATE) AS Info;";
 
@@ -221,8 +219,6 @@ namespace TRL_API.DAL
                 INSERT INTO TenantLeases (TenantId, UnitId, RentAmount, StartDate, TenureMonths, IsActive, CreatedBy)
                 VALUES (@TenantId, @UnitId, ISNULL(@NewRent, @OldRent), @NewStart, @TenureMonths, 1, @CreatedBy);
 
-                UPDATE Tenants SET MonthlyRent = ISNULL(@NewRent, @OldRent) WHERE TenantId = @TenantId AND UnitId = @UnitId;
-
                 DECLARE @Affected TABLE (LeaseId INT);
                 INSERT INTO @Affected VALUES (@LeaseId);
                 " + AdjustInvoicesAfterEndSql + @"
@@ -260,7 +256,7 @@ namespace TRL_API.DAL
         {
             string query = @"
                 SET XACT_ABORT ON;
-                DECLARE @TenantId INT, @UnitId INT, @Start DATE, @PrevId INT, @PrevRent DECIMAL(18,2), @PrevEnd DATE,
+                DECLARE @TenantId INT, @UnitId INT, @Start DATE, @PrevId INT, @PrevEnd DATE,
                         @Today DATE = dbo.BusinessToday(), @AdjReason NVARCHAR(300) = N'Renewal cancelled';
 
                 -- Lock the renewal and the lease it replaced, like Renew/Terminate do
@@ -270,7 +266,7 @@ namespace TRL_API.DAL
                 IF @TenantId IS NULL BEGIN ROLLBACK; SELECT 'NOT_FOUND' AS Result, CAST(NULL AS DATE) AS PrevEnd; RETURN; END
                 IF @Start <= @Today BEGIN ROLLBACK; SELECT 'STARTED' AS Result, CAST(NULL AS DATE) AS PrevEnd; RETURN; END
 
-                SELECT @PrevId = LeaseId, @PrevRent = RentAmount, @PrevEnd = EndDate
+                SELECT @PrevId = LeaseId, @PrevEnd = EndDate
                 FROM TenantLeases WITH (UPDLOCK, HOLDLOCK)
                 WHERE TenantId = @TenantId AND UnitId = @UnitId AND IsActive = 0
                   AND TerminationReason = 'Renewed' AND BilledThrough = DATEADD(DAY, -1, @Start);
@@ -292,8 +288,6 @@ namespace TRL_API.DAL
                 UPDATE TenantLeases
                 SET IsActive = 1, TerminatedAt = NULL, TerminationReason = NULL, BilledThrough = NULL
                 WHERE LeaseId = @PrevId;
-
-                UPDATE Tenants SET MonthlyRent = @PrevRent WHERE TenantId = @TenantId AND UnitId = @UnitId;
 
                 -- The renewal's invoices (no payment that still counts: reversed ones net to zero) are cancelled by the usual correction
                 DECLARE @Affected TABLE (LeaseId INT);
@@ -377,16 +371,9 @@ namespace TRL_API.DAL
                   AND (l.BilledThrough IS NULL OR l.BilledThrough > @MoveOut);
                 INSERT INTO @Affected SELECT @LeaseId WHERE @TenantId IS NOT NULL;
 
-                -- The tenant moves out only when no other active lease remains; otherwise point the tenant row at that lease
+                -- The tenant moves out only when no other active lease remains
                 IF NOT EXISTS (SELECT 1 FROM TenantLeases WHERE TenantId = @TenantId AND IsActive = 1)
                     UPDATE Tenants SET IsActive = 0, MoveOutDate = @MoveOut WHERE TenantId = @TenantId;
-                ELSE
-                    UPDATE t SET UnitId = u.UnitId, FloorId = u.FloorId, BuildingId = u.BuildingId, MonthlyRent = a.RentAmount
-                    FROM Tenants t
-                    CROSS APPLY (SELECT TOP 1 UnitId, RentAmount FROM TenantLeases
-                                 WHERE TenantId = t.TenantId AND IsActive = 1 ORDER BY StartDate DESC) a
-                    JOIN Units u ON u.UnitId = a.UnitId
-                    WHERE t.TenantId = @TenantId AND t.UnitId = @UnitId;
                 " + AdjustInvoicesAfterEndSql + @"
                 COMMIT;
 
@@ -461,10 +448,6 @@ namespace TRL_API.DAL
 
                 UPDATE TenantLeases SET StartDate = @StartDate, RentAmount = @RentAmount, TenureMonths = @TenureMonths
                 WHERE LeaseId = @LeaseId;
-
-                -- Tenants.MonthlyRent caches the rent of the tenant's lease on this unit (Create/Renew keep it the same way)
-                IF @RentChanged = 1
-                    UPDATE Tenants SET MonthlyRent = @RentAmount WHERE TenantId = @TenantId AND UnitId = @UnitId;
 
                 COMMIT;
                 SELECT 'OK' AS Result, CAST(NULL AS DATE) AS Info;";
@@ -546,13 +529,6 @@ namespace TRL_API.DAL
                 BEGIN
                     IF NOT EXISTS (SELECT 1 FROM TenantLeases WHERE TenantId = @TenantId AND IsActive = 1)
                         UPDATE Tenants SET IsActive = 0, MoveOutDate = dbo.BusinessToday() WHERE TenantId = @TenantId;
-                    ELSE
-                        UPDATE t SET UnitId = u.UnitId, FloorId = u.FloorId, BuildingId = u.BuildingId, MonthlyRent = a.RentAmount
-                        FROM Tenants t
-                        CROSS APPLY (SELECT TOP 1 UnitId, RentAmount FROM TenantLeases
-                                     WHERE TenantId = t.TenantId AND IsActive = 1 ORDER BY StartDate DESC) a
-                        JOIN Units u ON u.UnitId = a.UnitId
-                        WHERE t.TenantId = @TenantId AND t.UnitId = @UnitId;
                 END
 
                 -- Its rent invoices (no payment that still counts: reversed ones net to zero) are cancelled by the usual correction

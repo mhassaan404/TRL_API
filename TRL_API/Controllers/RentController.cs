@@ -68,10 +68,6 @@ namespace TRL_API.Controllers
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
 
-        [HttpGet("GetOccupancy")]
-        public async Task<IActionResult> GetOccupancy() =>
-            Ok(DataTableHelper.ToDictionaryList(await _service.GetOccupancyAsync(), true));
-
         [HttpGet("GetVacantUnits")]
         public async Task<IActionResult> GetVacantUnits([FromQuery] int? includeUnitId) =>
             Ok(DataTableHelper.ToDictionaryList(await _service.GetVacantUnitsAsync(includeUnitId), true));

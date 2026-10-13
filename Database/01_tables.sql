@@ -12,11 +12,11 @@ CREATE TABLE [dbo].[Buildings](
 	[TypeId] [int] NULL,
 	[Address] [nvarchar](200) NULL,
 	[IsActive] [bit] NULL,
- CONSTRAINT [PK__Building__5463CDC45D210E37] PRIMARY KEY CLUSTERED 
+ CONSTRAINT [PK_Buildings] PRIMARY KEY CLUSTERED 
 (
 	[BuildingId] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY],
- CONSTRAINT [UQ__Building__2D13A8E2518E9D11] UNIQUE NONCLUSTERED 
+ CONSTRAINT [UQ_Buildings_BuildingName] UNIQUE NONCLUSTERED 
 (
 	[BuildingName] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
@@ -31,13 +31,13 @@ CREATE TABLE [dbo].[BuildingType](
 	[Id] [int] IDENTITY(1,1) NOT NULL,
 	[Name] [varchar](50) NOT NULL,
 	[IsActive] [bit] NULL,
-PRIMARY KEY CLUSTERED 
+ CONSTRAINT [PK_BuildingType] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-ALTER TABLE [dbo].[BuildingType] ADD  DEFAULT ((1)) FOR [IsActive]
+ALTER TABLE [dbo].[BuildingType] ADD  CONSTRAINT [DF_BuildingType_IsActive]  DEFAULT ((1)) FOR [IsActive]
 GO
 
 SET ANSI_NULLS ON
@@ -48,13 +48,13 @@ CREATE TABLE [dbo].[City](
 	[Id] [int] IDENTITY(1,1) NOT NULL,
 	[Name] [varchar](100) NOT NULL,
 	[IsActive] [bit] NULL,
-PRIMARY KEY CLUSTERED 
+ CONSTRAINT [PK_City] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-ALTER TABLE [dbo].[City] ADD  DEFAULT ((1)) FOR [IsActive]
+ALTER TABLE [dbo].[City] ADD  CONSTRAINT [DF_City_IsActive]  DEFAULT ((1)) FOR [IsActive]
 GO
 
 SET ANSI_NULLS ON
@@ -97,7 +97,7 @@ CREATE TABLE [dbo].[Floors](
 	[BuildingId] [int] NOT NULL,
 	[FloorNumber] [nvarchar](50) NOT NULL,
 	[IsActive] [bit] NULL,
-PRIMARY KEY CLUSTERED 
+ CONSTRAINT [PK_Floors] PRIMARY KEY CLUSTERED 
 (
 	[FloorId] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY],
@@ -121,7 +121,7 @@ CREATE TABLE [dbo].[InvoiceAudit](
 	[Reason] [nvarchar](300) NULL,
 	[CreatedBy] [int] NULL,
 	[CreatedAt] [datetime] NOT NULL,
-PRIMARY KEY CLUSTERED 
+ CONSTRAINT [PK_InvoiceAudit] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
@@ -132,24 +132,7 @@ CREATE NONCLUSTERED INDEX [IX_InvoiceAudit_Invoice] ON [dbo].[InvoiceAudit]
 	[InvoiceId] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
 GO
-ALTER TABLE [dbo].[InvoiceAudit] ADD  DEFAULT (getdate()) FOR [CreatedAt]
-GO
-
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[InvoiceStatus](
-	[Id] [int] IDENTITY(1,1) NOT NULL,
-	[Name] [nvarchar](50) NOT NULL,
-	[IsActive] [bit] NOT NULL,
-PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-ALTER TABLE [dbo].[InvoiceStatus] ADD  DEFAULT ((1)) FOR [IsActive]
+ALTER TABLE [dbo].[InvoiceAudit] ADD  CONSTRAINT [DF_InvoiceAudit_CreatedAt]  DEFAULT (getdate()) FOR [CreatedAt]
 GO
 
 SET ANSI_NULLS ON
@@ -301,7 +284,7 @@ CREATE TABLE [dbo].[Payments](
 	[DiscountPercent] [decimal](5, 2) NOT NULL,
 	[IsLateFeeWaived] [bit] NOT NULL,
 	[ReversalOfPaymentId] [int] NULL,
- CONSTRAINT [PK__Payments__3214EC075A09B4C7] PRIMARY KEY CLUSTERED 
+ CONSTRAINT [PK_Payments] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
@@ -312,13 +295,13 @@ CREATE NONCLUSTERED INDEX [IX_Payments_Invoice] ON [dbo].[Payments]
 	[RentInvoiceId] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
 GO
-ALTER TABLE [dbo].[Payments] ADD  CONSTRAINT [DF__Payments__Create__173876EA]  DEFAULT (getdate()) FOR [CreatedAt]
+ALTER TABLE [dbo].[Payments] ADD  CONSTRAINT [DF_Payments_CreatedAt]  DEFAULT (getdate()) FOR [CreatedAt]
 GO
-ALTER TABLE [dbo].[Payments] ADD  CONSTRAINT [DF__Payments__Discou__2CBDA3B5]  DEFAULT ((0)) FOR [DiscountAmount]
+ALTER TABLE [dbo].[Payments] ADD  CONSTRAINT [DF_Payments_DiscountAmount]  DEFAULT ((0)) FOR [DiscountAmount]
 GO
-ALTER TABLE [dbo].[Payments] ADD  CONSTRAINT [DF__Payments__Discou__2DB1C7EE]  DEFAULT ((0)) FOR [DiscountPercent]
+ALTER TABLE [dbo].[Payments] ADD  CONSTRAINT [DF_Payments_DiscountPercent]  DEFAULT ((0)) FOR [DiscountPercent]
 GO
-ALTER TABLE [dbo].[Payments] ADD  CONSTRAINT [DF__Payments__LateFe__2EA5EC27]  DEFAULT ((0)) FOR [IsLateFeeWaived]
+ALTER TABLE [dbo].[Payments] ADD  CONSTRAINT [DF_Payments_IsLateFeeWaived]  DEFAULT ((0)) FOR [IsLateFeeWaived]
 GO
 CREATE NONCLUSTERED INDEX [IX_Payments_Tenant] ON [dbo].[Payments]
 (
@@ -352,7 +335,7 @@ CREATE TABLE [dbo].[RefreshTokens](
 	[IsRevoked] [bit] NOT NULL,
 	[UserId] [int] NOT NULL,
 	[CreatedAt] [datetime2](7) NULL,
-PRIMARY KEY CLUSTERED 
+ CONSTRAINT [PK_RefreshTokens] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
@@ -370,7 +353,7 @@ CREATE UNIQUE NONCLUSTERED INDEX [UX_RefreshTokens_Token] ON [dbo].[RefreshToken
 	[Token] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
 GO
-ALTER TABLE [dbo].[RefreshTokens] ADD  DEFAULT ((0)) FOR [IsRevoked]
+ALTER TABLE [dbo].[RefreshTokens] ADD  CONSTRAINT [DF_RefreshTokens_IsRevoked]  DEFAULT ((0)) FOR [IsRevoked]
 GO
 
 SET ANSI_NULLS ON
@@ -400,7 +383,7 @@ CREATE TABLE [dbo].[RentInvoices](
 	[LateFeePerDay] [decimal](18, 2) NOT NULL,
 	[LateFeeMaxMultiplier] [decimal](5, 2) NOT NULL,
 	[RelatedInvoiceId] [int] NULL,
-PRIMARY KEY CLUSTERED 
+ CONSTRAINT [PK_RentInvoices] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
@@ -435,13 +418,13 @@ CREATE UNIQUE NONCLUSTERED INDEX [UX_RentInvoices_RentPerLeaseMonth] ON [dbo].[R
 WHERE ([ChargeType] IS NULL AND [StatusId]<>(6) AND [LeaseId] IS NOT NULL)
 WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
 GO
-ALTER TABLE [dbo].[RentInvoices] ADD  DEFAULT ((0)) FOR [PendingAmount]
+ALTER TABLE [dbo].[RentInvoices] ADD  CONSTRAINT [DF_RentInvoices_PendingAmount]  DEFAULT ((0)) FOR [PendingAmount]
 GO
-ALTER TABLE [dbo].[RentInvoices] ADD  DEFAULT (getdate()) FOR [CreatedAt]
+ALTER TABLE [dbo].[RentInvoices] ADD  CONSTRAINT [DF_RentInvoices_CreatedAt]  DEFAULT (getdate()) FOR [CreatedAt]
 GO
-ALTER TABLE [dbo].[RentInvoices] ADD  DEFAULT ((0)) FOR [DiscountAmount]
+ALTER TABLE [dbo].[RentInvoices] ADD  CONSTRAINT [DF_RentInvoices_DiscountAmount]  DEFAULT ((0)) FOR [DiscountAmount]
 GO
-ALTER TABLE [dbo].[RentInvoices] ADD  DEFAULT ((0)) FOR [IsLateFeeWaived]
+ALTER TABLE [dbo].[RentInvoices] ADD  CONSTRAINT [DF_RentInvoices_IsLateFeeWaived]  DEFAULT ((0)) FOR [IsLateFeeWaived]
 GO
 ALTER TABLE [dbo].[RentInvoices] ADD  CONSTRAINT [DF_RI_LFC]  DEFAULT ((0)) FOR [LateFeeCharged]
 GO
@@ -456,36 +439,6 @@ GO
 ALTER TABLE [dbo].[RentInvoices]  WITH CHECK ADD  CONSTRAINT [CK_RentInvoices_LateFeeTerms] CHECK  (([LateFeePerDay]>=(0) AND [LateFeeMaxMultiplier]>=(0)))
 GO
 ALTER TABLE [dbo].[RentInvoices] CHECK CONSTRAINT [CK_RentInvoices_LateFeeTerms]
-GO
-
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[RentPayments](
-	[Id] [int] IDENTITY(1,1) NOT NULL,
-	[RentInvoiceId] [int] NOT NULL,
-	[TenantId] [int] NOT NULL,
-	[PaymentAmount] [decimal](18, 2) NOT NULL,
-	[DiscountAmount] [decimal](18, 2) NOT NULL,
-	[IsLateFeeWaived] [bit] NOT NULL,
-	[PaymentMethod] [nvarchar](50) NULL,
-	[PaymentDate] [date] NULL,
-	[Notes] [nvarchar](500) NULL,
-	[CreatedAt] [datetime] NOT NULL,
-PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-ALTER TABLE [dbo].[RentPayments] ADD  DEFAULT ((0)) FOR [PaymentAmount]
-GO
-ALTER TABLE [dbo].[RentPayments] ADD  DEFAULT ((0)) FOR [DiscountAmount]
-GO
-ALTER TABLE [dbo].[RentPayments] ADD  DEFAULT ((0)) FOR [IsLateFeeWaived]
-GO
-ALTER TABLE [dbo].[RentPayments] ADD  DEFAULT (getdate()) FOR [CreatedAt]
 GO
 
 SET ANSI_NULLS ON
@@ -710,7 +663,7 @@ CREATE TABLE [dbo].[StatusList](
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-ALTER TABLE [dbo].[StatusList] ADD  CONSTRAINT [DF__StatusLis__IsAct__36B12243]  DEFAULT ((1)) FOR [IsActive]
+ALTER TABLE [dbo].[StatusList] ADD  CONSTRAINT [DF_StatusList_IsActive]  DEFAULT ((1)) FOR [IsActive]
 GO
 
 SET ANSI_NULLS ON
@@ -731,7 +684,7 @@ CREATE TABLE [dbo].[TenantLeases](
 	[CreatedBy] [int] NULL,
 	[CreatedAt] [datetime] NOT NULL,
 	[BilledThrough] [date] NULL,
-PRIMARY KEY CLUSTERED 
+ CONSTRAINT [PK_TenantLeases] PRIMARY KEY CLUSTERED 
 (
 	[LeaseId] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
@@ -750,9 +703,9 @@ CREATE UNIQUE NONCLUSTERED INDEX [UX_TenantLeases_ActiveUnit] ON [dbo].[TenantLe
 WHERE ([IsActive]=(1))
 WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
 GO
-ALTER TABLE [dbo].[TenantLeases] ADD  DEFAULT ((1)) FOR [IsActive]
+ALTER TABLE [dbo].[TenantLeases] ADD  CONSTRAINT [DF_TenantLeases_IsActive]  DEFAULT ((1)) FOR [IsActive]
 GO
-ALTER TABLE [dbo].[TenantLeases] ADD  DEFAULT (getdate()) FOR [CreatedAt]
+ALTER TABLE [dbo].[TenantLeases] ADD  CONSTRAINT [DF_TenantLeases_CreatedAt]  DEFAULT (getdate()) FOR [CreatedAt]
 GO
 ALTER TABLE [dbo].[TenantLeases]  WITH CHECK ADD  CONSTRAINT [CK_TenantLeases_BilledThrough] CHECK  (([BilledThrough] IS NULL OR [BilledThrough]>=dateadd(day,(-1),[StartDate])))
 GO
@@ -778,9 +731,9 @@ CREATE TABLE [dbo].[Tenants](
 	[MonthlyRent] [decimal](18, 2) NULL,
 	[MoveOutDate] [datetime] NULL,
 	[CityId] [int] NULL,
-	[CreatedBy] [varchar](150) NULL,
+	[CreatedBy] [int] NULL,
 	[CreatedAt] [datetime] NULL,
-	[UpdatedBy] [varchar](150) NULL,
+	[UpdatedBy] [int] NULL,
 	[UpdatedAt] [datetime] NULL,
 	[Notes] [nvarchar](max) NULL,
 	[IsActive] [bit] NULL,
@@ -789,7 +742,7 @@ CREATE TABLE [dbo].[Tenants](
 	[ContactPerson] [nvarchar](150) NULL,
 	[CnicNtn] [nvarchar](20) NULL,
 	[Address] [nvarchar](500) NULL,
- CONSTRAINT [PK__Tenants__3214EC077E9072C9] PRIMARY KEY CLUSTERED 
+ CONSTRAINT [PK_Tenants] PRIMARY KEY CLUSTERED 
 (
 	[TenantId] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
@@ -802,7 +755,7 @@ CREATE NONCLUSTERED INDEX [IX_Tenants_Building_Floor_Unit] ON [dbo].[Tenants]
 	[UnitId] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
 GO
-ALTER TABLE [dbo].[Tenants] ADD  CONSTRAINT [DF__Tenants__Created__108B795B]  DEFAULT (getdate()) FOR [CreatedAt]
+ALTER TABLE [dbo].[Tenants] ADD  CONSTRAINT [DF_Tenants_CreatedAt]  DEFAULT (getdate()) FOR [CreatedAt]
 GO
 ALTER TABLE [dbo].[Tenants] ADD  CONSTRAINT [DF_Tenants_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
@@ -827,7 +780,7 @@ CREATE TABLE [dbo].[Units](
 	[IsActive] [bit] NULL,
 	[Note] [varchar](255) NULL,
 	[PropertyType] [nvarchar](50) NULL,
- CONSTRAINT [PK__Units__44F5ECB56B82DD82] PRIMARY KEY CLUSTERED 
+ CONSTRAINT [PK_Units] PRIMARY KEY CLUSTERED 
 (
 	[UnitId] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY],
@@ -838,7 +791,7 @@ CREATE TABLE [dbo].[Units](
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-ALTER TABLE [dbo].[Units] ADD  CONSTRAINT [DF__Units__BaseRent__07C12930]  DEFAULT ((0)) FOR [BaseRent]
+ALTER TABLE [dbo].[Units] ADD  CONSTRAINT [DF_Units_BaseRent]  DEFAULT ((0)) FOR [BaseRent]
 GO
 
 SET ANSI_NULLS ON
@@ -849,13 +802,13 @@ CREATE TABLE [dbo].[UnitStatus](
 	[Id] [int] IDENTITY(1,1) NOT NULL,
 	[Name] [varchar](50) NOT NULL,
 	[IsActive] [bit] NULL,
-PRIMARY KEY CLUSTERED 
+ CONSTRAINT [PK_UnitStatus] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-ALTER TABLE [dbo].[UnitStatus] ADD  DEFAULT ((1)) FOR [IsActive]
+ALTER TABLE [dbo].[UnitStatus] ADD  CONSTRAINT [DF_UnitStatus_IsActive]  DEFAULT ((1)) FOR [IsActive]
 GO
 
 SET ANSI_NULLS ON
@@ -865,19 +818,15 @@ GO
 CREATE TABLE [dbo].[Users](
 	[UserId] [int] IDENTITY(1,1) NOT NULL,
 	[Username] [nvarchar](100) NOT NULL,
-	[Email] [nvarchar](100) NOT NULL,
+	[Email] [nvarchar](100) NULL,
 	[Phone] [nvarchar](20) NULL,
 	[PasswordHash] [nvarchar](255) NOT NULL,
 	[Role] [nvarchar](50) NOT NULL,
 	[CreatedAt] [datetime] NULL,
 	[IsActive] [bit] NULL,
-PRIMARY KEY CLUSTERED 
+ CONSTRAINT [PK_Users] PRIMARY KEY CLUSTERED 
 (
 	[UserId] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY],
-UNIQUE NONCLUSTERED 
-(
-	[Email] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY],
  CONSTRAINT [UQ_Users_Username] UNIQUE NONCLUSTERED 
 (
@@ -885,8 +834,17 @@ UNIQUE NONCLUSTERED
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-ALTER TABLE [dbo].[Users] ADD  DEFAULT (getdate()) FOR [CreatedAt]
+SET ANSI_PADDING ON
 GO
-ALTER TABLE [dbo].[Users] ADD  DEFAULT ((1)) FOR [IsActive]
+CREATE UNIQUE NONCLUSTERED INDEX [UX_Users_Email] ON [dbo].[Users]
+(
+	[Email] ASC
+)
+WHERE ([Email] IS NOT NULL)
+WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+GO
+ALTER TABLE [dbo].[Users] ADD  CONSTRAINT [DF_Users_CreatedAt]  DEFAULT (getdate()) FOR [CreatedAt]
+GO
+ALTER TABLE [dbo].[Users] ADD  CONSTRAINT [DF_Users_IsActive]  DEFAULT ((1)) FOR [IsActive]
 GO
 

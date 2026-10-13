@@ -106,6 +106,25 @@ export default async ({ a }) => {
     ok(dash.length === 7 && thisMonth && Number(thisMonth.totalRentDue) === due && Number(thisMonth.collectedAmount) === paid, `dashboard this month: due ${due}, collected ${paid}`, thisMonth)
   }
 
+  section('payment without an invoice: building comes from the tenant\'s lease')
+  {
+    const building = num(db, `SELECT f.BuildingId FROM Units u JOIN Floors f ON f.FloorId = u.FloorId WHERE u.UnitId = ${t.unitId}`)
+    const month = monthStart(TODAY)
+    const cashOf = async () => sum((await a.get(`/Reports/BillingVsCollection?fromMonth=${month}&toMonth=${month}&buildingId=${building}`)).json, 'cashReceived')
+    const before = await cashOf()
+    // Older rows can have no invoice (RentInvoiceId NULL); removed again below
+    const id = num(db, `INSERT INTO Payments (TenantId, PaymentAmount, PaymentDate, RentInvoiceId, PaymentMethod, Notes, DiscountAmount, DiscountPercent, IsLateFeeWaived, CreatedBy, CreatedAt)
+      OUTPUT inserted.Id VALUES (${t.tenantId}, 123.45, '${TODAY}', NULL, N'Cash', N'e2e no invoice', 0, 0, 0, 1, GETDATE())`)
+    try {
+      const after = await cashOf()
+      ok(round2(after - before) === 123.45, 'Billing vs Collection (building filter) counts it as cash received', { before, after })
+      const row = ((await a.get(`/Reports/Collections?from=${TODAY}&to=${TODAY}`)).json || []).find((p) => p.paymentId === id)
+      ok(row && row.unitNumber && row.buildingName, 'Collections shows its building and unit', row)
+    } finally {
+      sql(db, `DELETE FROM Payments WHERE Id = ${id}`)
+    }
+  }
+
   section('report access needs a login')
   {
     const r = await a.get('/Reports/ArrearsAgeing', { anonymous: true })

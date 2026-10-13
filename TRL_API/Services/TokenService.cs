@@ -12,7 +12,8 @@ namespace TRL_API.Services
         private readonly JwtSettings _jwtSettings;
         public TokenService(IConfiguration configuration)
         {
-            _jwtSettings = configuration.GetSection("JwtSettings").Get<JwtSettings>();
+            // Program.cs refuses to start without JwtSettings:SecretKey, so the section is always there
+            _jwtSettings = configuration.GetSection("JwtSettings").Get<JwtSettings>() ?? new JwtSettings();
         }
 
         // clientId: the client (database) this session belongs to; checked on every request (Program.cs)

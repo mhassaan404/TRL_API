@@ -29,15 +29,20 @@ namespace TRL_API.Controllers
         private readonly ITokenService _tokenService;
         private readonly JwtSettings _jwt;
         private readonly LoginThrottle _throttle;
+        // Security events (failed/locked logins, refused sessions, password changes) are logged as warnings, so they
+        // reach the log file: client code, username and IP only, never a password or token
+        private readonly ILogger<AuthController> _logger;
 
         // Users and refresh tokens are in each client's database: every action first finds the client (by the code
         // typed at login, or by the client id in the refresh cookie), then works only in that client's database.
-        public AuthController(IClientCatalog catalog, ITokenService tokenService, IConfiguration configuration, LoginThrottle throttle)
+        public AuthController(IClientCatalog catalog, ITokenService tokenService, IConfiguration configuration, LoginThrottle throttle,
+            ILogger<AuthController> logger)
         {
             _catalog = catalog;
             _tokenService = tokenService;
             _jwt = configuration.GetSection("JwtSettings").Get<JwtSettings>() ?? new JwtSettings();
             _throttle = throttle;
+            _logger = logger;
         }
 
         // Also limited per IP address by the "login" rate-limit policy (Program.cs)
@@ -55,6 +60,8 @@ namespace TRL_API.Controllers
             var lockedMinutes = _throttle.LockedMinutesLeft(clientCode, request.Username, ClientIp);
             if (lockedMinutes != null)
             {
+                _logger.LogWarning("Login refused for {Client}/{User} from {Ip}: locked after repeated failures ({Minutes} min left).",
+                    clientCode, request.Username, ClientIp, lockedMinutes);
                 var msg = $"Too many failed login attempts. Try again in {lockedMinutes} minute(s).";
                 return StatusCode(StatusCodes.Status429TooManyRequests, new ApiResponse { IsSuccess = false, Message = msg, ErrorMessage = msg });
             }
@@ -65,6 +72,7 @@ namespace TRL_API.Controllers
             {
                 BCrypt.Net.BCrypt.Verify(request.Password, NoUserHash);
                 _throttle.RecordFailure(clientCode, request.Username, ClientIp);
+                _logger.LogWarning("Login failed for {Client}/{User} from {Ip}: unknown or inactive client code.", clientCode, request.Username, ClientIp);
                 return Unauthorized(new ApiResponse { IsSuccess = false, ErrorMessage = InvalidLogin });
             }
 
@@ -73,6 +81,7 @@ namespace TRL_API.Controllers
             if (!BCrypt.Net.BCrypt.Verify(request.Password, user?.PasswordHash ?? NoUserHash) || user == null)
             {
                 _throttle.RecordFailure(clientCode, request.Username, ClientIp);
+                _logger.LogWarning("Login failed for {Client}/{User} from {Ip}: wrong username or password.", clientCode, request.Username, ClientIp);
                 return Unauthorized(new ApiResponse { IsSuccess = false, ErrorMessage = InvalidLogin });
             }
             _throttle.Reset(clientCode, request.Username, ClientIp);
@@ -80,12 +89,16 @@ namespace TRL_API.Controllers
             // Checked only after the password is verified, so it doesn't reveal which accounts exist
             if (user.IsActive != true)
             {
+                _logger.LogWarning("Login refused for {Client}/{User} from {Ip}: the account is deactivated.", clientCode, request.Username, ClientIp);
                 const string msg = "This account is deactivated. Contact an administrator.";
                 return StatusCode(StatusCodes.Status403Forbidden, new ApiResponse { IsSuccess = false, Message = msg, ErrorMessage = msg });
             }
             // Only Admin can use the app until tenant-specific access exists (every controller requires Admin)
             if (user.Role != "Admin")
+            {
+                _logger.LogWarning("Login refused for {Client}/{User} from {Ip}: role {Role} has no access.", clientCode, request.Username, ClientIp, user.Role);
                 return StatusCode(StatusCodes.Status403Forbidden, new ApiResponse { IsSuccess = false, Message = "This account doesn't have access to the application.", ErrorMessage = "This account doesn't have access to the application." });
+            }
 
             // A client database that hasn't been migrated to what this API needs can't be used yet
             if (!await _catalog.IsSchemaCurrentAsync(client))
@@ -129,7 +142,14 @@ namespace TRL_API.Controllers
             var tokenEntity = await db.RefreshTokens.Include(t => t.User).FirstOrDefaultAsync(t => t.Token == hash);
             if (tokenEntity == null || tokenEntity.IsRevoked || tokenEntity.Expires < DateTime.UtcNow
                 || tokenEntity.User.Role != "Admin" || tokenEntity.User.IsActive != true)
+            {
+                // An old or stolen token, or one signed out by a password change; the token itself is not logged
+                _logger.LogWarning("Session refresh refused for client {Client} from {Ip}: {Reason}.", client.Client.ClientCode, ClientIp,
+                    tokenEntity == null ? "unknown or already used refresh token"
+                    : tokenEntity.Expires < DateTime.UtcNow || tokenEntity.IsRevoked ? "expired or revoked refresh token"
+                    : "the user is no longer allowed");
                 return ExpiredSession();
+            }
 
             // Remove expired tokens
             db.RefreshTokens.RemoveRange(db.RefreshTokens.Where(t => t.Expires < DateTime.UtcNow));
@@ -184,6 +204,7 @@ namespace TRL_API.Controllers
             var lockedMinutes = _throttle.LockedMinutesLeft(client.ClientCode, username, ClientIp, PasswordScope);
             if (lockedMinutes != null)
             {
+                _logger.LogWarning("Password change refused for {Client}/{User} from {Ip}: locked after wrong current passwords.", client.ClientCode, username, ClientIp);
                 var msg = $"Too many wrong current passwords. Try again in {lockedMinutes} minute(s).";
                 return StatusCode(StatusCodes.Status429TooManyRequests, new ApiResponse { IsSuccess = false, Message = msg, ErrorMessage = msg });
             }
@@ -201,6 +222,7 @@ namespace TRL_API.Controllers
             if (!BCrypt.Net.BCrypt.Verify(request!.CurrentPassword, user.PasswordHash))
             {
                 _throttle.RecordFailure(client.ClientCode, username, ClientIp, PasswordScope);
+                _logger.LogWarning("Password change failed for {Client}/{User} from {Ip}: wrong current password.", client.ClientCode, username, ClientIp);
                 return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "Your current password is incorrect." });
             }
             _throttle.Reset(client.ClientCode, username, ClientIp, PasswordScope);
@@ -220,6 +242,8 @@ namespace TRL_API.Controllers
                 CreatedAt = DateTime.UtcNow
             });
             await db.SaveChangesAsync();
+            // A warning on purpose: a password change is a security event worth keeping in the log file
+            _logger.LogWarning("Password changed for {Client}/{User} from {Ip}; all other sessions were signed out.", client.ClientCode, username, ClientIp);
 
             SetAuthCookies(_tokenService.GenerateAccessToken(user, client.ClientId), RefreshCookieValue(client.ClientId, refreshToken));
             return Ok(new ApiResponse

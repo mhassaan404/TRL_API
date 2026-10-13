@@ -43,7 +43,7 @@ namespace TRL_API.DAL
                             THEN 1 ELSE 0 END AS BIT) AS CanReinstate
                 FROM RentInvoices ri
                 INNER JOIN Tenants t ON ri.TenantId = t.TenantId
-                LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
+                LEFT JOIN Units u ON u.UnitId = COALESCE(ri.UnitId, (SELECT cl.UnitId FROM dbo.TenantCurrentLease(t.TenantId) cl))
                 LEFT JOIN Floors f ON u.FloorId = f.FloorId
                 LEFT JOIN Buildings bd ON f.BuildingId = bd.BuildingId
                 LEFT JOIN TenantLeases rl ON rl.LeaseId = ri.LeaseId
@@ -79,7 +79,7 @@ namespace TRL_API.DAL
                        rel.ChargeType AS RelatedChargeType, rsl.StatusName AS RelatedStatus
                 FROM RentInvoices ri
                 INNER JOIN Tenants t ON t.TenantId = ri.TenantId
-                LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
+                LEFT JOIN Units u ON u.UnitId = COALESCE(ri.UnitId, (SELECT cl.UnitId FROM dbo.TenantCurrentLease(t.TenantId) cl))
                 LEFT JOIN Floors f ON f.FloorId = u.FloorId
                 LEFT JOIN Buildings b ON b.BuildingId = f.BuildingId
                 LEFT JOIN StatusList sl ON sl.StatusId = ri.StatusId

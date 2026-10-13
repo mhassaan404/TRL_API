@@ -137,7 +137,7 @@ static class Tool
     {
         var (code, name, key) = (Req(o, "code"), Req(o, "name"), Req(o, "connection-key"));
         var adminUser = Req(o, "admin-user").Trim();
-        var adminEmail = o.GetValueOrDefault("admin-email") ?? $"{adminUser}@{code.ToLowerInvariant()}.local";
+        var adminEmail = o.GetValueOrDefault("admin-email");   // optional (Users.Email may be empty)
         CheckCodeAndKey(code, key);
         if (adminUser.Length is < 3 or > 100) throw new ToolException("--admin-user must be 3 to 100 characters.");
         await CheckNotInCatalog(code, key);
@@ -169,7 +169,7 @@ static class Tool
 
             Console.WriteLine($"Creating Admin user '{adminUser}'...");
             await Exec(cs, "INSERT INTO dbo.Users (Username, Email, PasswordHash, Role, CreatedAt, IsActive) VALUES (@U, @E, @H, 'Admin', GETDATE(), 1)",
-                ("@U", adminUser), ("@E", adminEmail), ("@H", BCrypt.Net.BCrypt.HashPassword(password)));
+                ("@U", adminUser), ("@E", (object?)adminEmail ?? DBNull.Value), ("@H", BCrypt.Net.BCrypt.HashPassword(password)));
 
             await AddToCatalog(code, name, dbName, key);
         }

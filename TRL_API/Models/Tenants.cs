@@ -7,12 +7,9 @@ namespace TRL_API.Models
         [Key]
         public int TenantId { get; set; }
         public string? Name { get; set; }
-        public int BuildingId { get; set; }
-        public int FloorId { get; set; }
-        public int UnitId { get; set; }
+        // No unit or rent here: they come from the tenant's lease (dbo.TenantCurrentLease)
         public string? Contact { get; set; }
         public string? Email { get; set; }
-        public decimal? MonthlyRent { get; set; }
         public DateTime? MoveOutDate { get; set; }
         public int CityId { get; set; }
         public string? Notes { get; set; }

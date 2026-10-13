@@ -52,7 +52,7 @@ namespace TRL_API.DAL
                     b.BuildingName
                 FROM RentInvoices ri
                 INNER JOIN Tenants t ON ri.TenantId = t.TenantId
-                LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
+                LEFT JOIN Units u ON u.UnitId = COALESCE(ri.UnitId, (SELECT cl.UnitId FROM dbo.TenantCurrentLease(t.TenantId) cl))
                 LEFT JOIN Floors f ON u.FloorId = f.FloorId
                 LEFT JOIN Buildings b ON f.BuildingId = b.BuildingId
                 INNER JOIN StatusList s ON ri.StatusId = s.StatusId
@@ -62,29 +62,6 @@ namespace TRL_API.DAL
             var parameters = new[] { new SqlParameter("@TenantId", tenantId) };
             return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters);
         }
-
-        //            p.PaymentDate,
-        //            ri.TotalRent AS MonthlyRent,
-        //            ISNULL(p.PaymentAmount, 0) AS PaidAmount,
-
-        //            (ri.TotalRent - ISNULL(SUM(p.PaymentAmount + p.DiscountAmount)
-        //                                    OVER (PARTITION BY ri.Id
-        //                                          ORDER BY p.PaymentDate, p.Id
-        //                                          ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), 0))
-        //                AS RemainingAmount,
-
-        //            SUM(ISNULL(p.PaymentAmount, 0)) OVER (
-        //                PARTITION BY ri.Id
-        //                ORDER BY p.PaymentDate, p.Id
-        //                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-        //            ) AS TotalPaid,
-
-        //            ISNULL(p.DiscountAmount, 0) AS DiscountAmount,
-        //            ISNULL(p.DiscountPercent, 0) AS DiscountPercent,
-        //            ISNULL(p.IsLateFeeWaived, 0) AS waveLateFee,
-        //            ISNULL(p.PaymentMethod, '') AS PaymentMethod,
-        //            ISNULL(p.Notes, '') AS Notes
-
 
         public async Task<DataTable> GetPaymentHistoryByIdAsync(int invoiceId)
         {
@@ -131,38 +108,6 @@ namespace TRL_API.DAL
             var parameters = new[] { new SqlParameter("@InvoiceId", invoiceId) };
             return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters);
         }
-
-
-        //        WITH PaymentSums AS (
-        //            SELECT
-        //                ri.Id AS InvoiceId,
-        //                ISNULL(SUM(p.PaymentAmount), 0) AS Paid,
-        //                ISNULL(SUM(p.DiscountAmount), 0) AS DiscountAmount,
-        //                ISNULL(MAX(p.DiscountPercent), 0) AS DiscountPercent,
-        //                MAX(CASE WHEN p.IsLateFeeWaived = 1 THEN 1 ELSE 0 END) AS WaveLate
-        //                ri.Id AS InvoiceId,
-        //                ri.TenantId,
-        //                t.Name AS TenantName,
-        //                ri.InvoiceDate,
-        //                ri.DueDate,
-        //                ri.TotalRent AS MonthlyRent,
-        //                ps.Paid AS PaidAmount,
-        //                    ELSE 0
-        //                END AS LateFee,
-        //                ps.WaveLate,
-        //                ps.DiscountAmount,
-        //                ps.DiscountPercent,
-        //                0 AS PayAmount,
-        //                NULL AS PaymentDate,
-        //                NULL AS Method,
-        //                '' AS Notes,
-        //                SUM(ri.TotalRent - ISNULL(ps.Paid, 0) - ISNULL(ps.DiscountAmount, 0))
-        //                    OVER(PARTITION BY ri.TenantId ORDER BY ri.DueDate
-        //                         ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS PreviousBalance,
-        //                SUM(CASE WHEN ri.DueDate < GETDATE() AND ps.WaveLate = 0
-        //                         THEN ROUND(ri.TotalRent * 0.05, 0) ELSE 0 END)
-        //                    OVER(PARTITION BY ri.TenantId) AS TotalLateFeePerTenant,
-        //                SUM(ps.Paid) OVER(PARTITION BY ri.TenantId) AS TotalPaidPerTenant
 
 
         public async Task<DataTable> GetUnpaidInvoiceByTenant(int tenantId)
@@ -385,15 +330,11 @@ namespace TRL_API.DAL
             });
         }
 
-        public async Task<DataTable> GetOccupancyAsync() =>
-            await _dbHelper.ExecuteQueryReturnDataTableAsync(
-                "SELECT * FROM vw_UnitOccupancy ORDER BY BuildingName, FloorNumber, UnitNumber;");
-
         public async Task<DataTable> GetVacantUnitsAsync(int? includeUnitId)
         {
             var prm = new[] { new SqlParameter("@Include", SqlDbType.Int) { Value = (object?)includeUnitId ?? DBNull.Value } };
             // Vacant = no active lease on the unit (leases are the source of truth, so every unit of a tenant with
-            // several leases is excluded, not just the one the Tenants row points at). Deleted units, floors and
+            // several leases is excluded). Deleted units, floors and
             // buildings are left out. The lease form builds its building and floor lists from these rows, so a
             // floor only appears when it has at least one vacant unit.
             return await _dbHelper.ExecuteQueryReturnDataTableAsync(
@@ -440,7 +381,7 @@ namespace TRL_API.DAL
                     ) AS PreviousBalance
                 FROM RentInvoices ri
                 INNER JOIN Tenants t ON ri.TenantId = t.TenantId
-                LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
+                LEFT JOIN Units u ON u.UnitId = COALESCE(ri.UnitId, (SELECT cl.UnitId FROM dbo.TenantCurrentLease(t.TenantId) cl))
                 LEFT JOIN Floors f ON u.FloorId = f.FloorId
                 LEFT JOIN Buildings bd ON f.BuildingId = bd.BuildingId
                 INNER JOIN StatusList s ON ri.StatusId = s.StatusId
@@ -453,7 +394,10 @@ namespace TRL_API.DAL
 
         public async Task<DataTable> GetTenantsWithRent()
         {
-            string query = @"SELECT TenantId, Name, MonthlyRent FROM Tenants WHERE IsActive = 1 ORDER BY Name;";
+            // Rent of the tenant's current lease (dbo.TenantCurrentLease)
+            string query = @"SELECT t.TenantId, t.Name, cl.RentAmount AS MonthlyRent
+                             FROM Tenants t OUTER APPLY dbo.TenantCurrentLease(t.TenantId) cl
+                             WHERE t.IsActive = 1 ORDER BY t.Name;";
             return await _dbHelper.ExecuteQueryReturnDataTableAsync(query);
         }
 
@@ -575,7 +519,7 @@ namespace TRL_API.DAL
                     (TenantId, LeaseId, UnitId, TotalRent, PendingAmount, OverPaidAmount, InvoiceDate, DueDate, StatusId, Description, ChargeType, CreatedAt,
                      LateFeePerDay, LateFeeMaxMultiplier)
                 VALUES
-                    (@TenantId, @LeaseId, ISNULL(@UnitId, (SELECT UnitId FROM Tenants WHERE TenantId = @TenantId)),
+                    (@TenantId, @LeaseId, ISNULL(@UnitId, (SELECT cl.UnitId FROM dbo.TenantCurrentLease(@TenantId) cl)),
                      @TotalRent, @TotalRent, 0, @InvoiceDate, @DueDate, 2, @Description, @ChargeType, GETDATE(),
                      @LateFeePerDay, @LateFeeMaxMultiplier);";
 
@@ -636,7 +580,7 @@ namespace TRL_API.DAL
                     (TenantId, LeaseId, UnitId, TotalRent, PendingAmount, OverPaidAmount, InvoiceDate, DueDate, StatusId,
                      Description, ChargeType, CreatedAt, LateFeePerDay, LateFeeMaxMultiplier, RelatedInvoiceId)
                 OUTPUT inserted.Id INTO @New
-                SELECT x.TenantId, NULL, COALESCE((SELECT UnitId FROM RentInvoices WHERE Id = @RelatedInvoiceId), t.UnitId),
+                SELECT x.TenantId, NULL, COALESCE((SELECT UnitId FROM RentInvoices WHERE Id = @RelatedInvoiceId), (SELECT cl.UnitId FROM dbo.TenantCurrentLease(x.TenantId) cl)),
                        @Amount, @Amount, 0, @ChargeDate, @DueDate, 2,
                        @Description, @ChargeType, GETDATE(), @LateFeePerDay, @LateFeeMaxMultiplier, @RelatedInvoiceId
                 FROM @T x JOIN Tenants t ON t.TenantId = x.TenantId;
@@ -710,7 +654,7 @@ namespace TRL_API.DAL
                 LEFT JOIN Payments rv ON rv.ReversalOfPaymentId = p.Id
                 INNER JOIN RentInvoices ri ON ri.Id = p.RentInvoiceId
                 INNER JOIN Tenants t ON t.TenantId = p.TenantId
-                LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
+                LEFT JOIN Units u ON u.UnitId = COALESCE(ri.UnitId, (SELECT cl.UnitId FROM dbo.TenantCurrentLease(t.TenantId) cl))
                 LEFT JOIN Floors f ON u.FloorId = f.FloorId
                 LEFT JOIN Buildings bd ON f.BuildingId = bd.BuildingId
                 WHERE (@From IS NULL OR p.PaymentDate >= @From)

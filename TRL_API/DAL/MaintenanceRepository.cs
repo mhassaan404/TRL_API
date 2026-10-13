@@ -235,7 +235,7 @@ namespace TRL_API.DAL
                     (TenantId, LeaseId, UnitId, TotalRent, PendingAmount, OverPaidAmount, InvoiceDate, DueDate, StatusId,
                      Description, ChargeType, CreatedAt, LateFeePerDay, LateFeeMaxMultiplier)
                 OUTPUT inserted.Id INTO @New
-                SELECT @TenantId, NULL, ISNULL(@UnitId, t.UnitId), @Amount, @Amount, 0, dbo.BusinessToday(), @DueDate, 2,
+                SELECT @TenantId, NULL, ISNULL(@UnitId, (SELECT cl.UnitId FROM dbo.TenantCurrentLease(@TenantId) cl)), @Amount, @Amount, 0, dbo.BusinessToday(), @DueDate, 2,
                        @Description, 'Maintenance', GETDATE(), @LateFeePerDay, @LateFeeMaxMultiplier
                 FROM Tenants t WHERE t.TenantId = @TenantId;
                 SELECT @InvoiceId = Id FROM @New;

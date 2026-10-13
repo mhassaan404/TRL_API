@@ -34,13 +34,13 @@ BEGIN
 END
 GO
 
+-- Today's business date: Pakistan (UTC+5, no daylight saving), whatever time zone the server runs in.
+-- (Comments stay outside the function's own batch, so the stored text equals what migration 2026-10-12b creates.)
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
--- Today's business date: Pakistan (UTC+5, no daylight saving), whatever time zone the server runs in
-CREATE   FUNCTION dbo.BusinessToday()
+CREATE OR ALTER FUNCTION dbo.BusinessToday()
 RETURNS DATE
 AS
 BEGIN
@@ -105,3 +105,21 @@ RETURN
     WHERE l.LeaseId = @LeaseId;
 GO
 
+
+-- The lease that stands for a tenant's unit and rent: for a tenant still renting, their most recently made active lease
+-- (like the old Tenants.UnitId/MonthlyRent copy, which pointed at the last lease made); for a moved-out tenant, their last
+-- lease that wasn't a cancelled renewal (a cancelled renewal never replaced the term it was meant to follow).
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER FUNCTION dbo.TenantCurrentLease (@TenantId INT)
+RETURNS TABLE
+AS
+RETURN
+    SELECT TOP (1) l.LeaseId, l.UnitId, l.RentAmount
+    FROM dbo.TenantLeases l
+    INNER JOIN dbo.Tenants t ON t.TenantId = l.TenantId
+    WHERE l.TenantId = @TenantId AND (l.IsActive = 1 OR (t.IsActive = 0 AND ISNULL(l.TerminationReason, '') <> 'Renewal cancelled'))
+    ORDER BY l.IsActive DESC, l.LeaseId DESC
+GO

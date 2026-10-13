@@ -29,9 +29,8 @@ namespace TRL_API.DAL
                 us.Id AS StatusId,
                 us.Name AS Status,
                 u.Note,
-                -- Occupied = the unit has an active lease (or an active tenant still points at it)
+                -- Occupied = the unit has an active lease
                 CAST(CASE WHEN EXISTS (SELECT 1 FROM TenantLeases tl WHERE tl.UnitId = u.UnitId AND tl.IsActive = 1)
-                            OR EXISTS (SELECT 1 FROM Tenants t WHERE t.UnitId = u.UnitId AND t.IsActive = 1 AND t.IsDeleted = 0)
                           THEN 1 ELSE 0 END AS BIT) AS IsOccupied
             FROM Buildings b
             INNER JOIN Floors f ON f.BuildingId = b.BuildingId

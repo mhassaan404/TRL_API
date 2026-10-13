@@ -15,13 +15,6 @@ WHERE NOT EXISTS (SELECT 1 FROM [dbo].[City] t WHERE t.Id = v.Id);
 SET IDENTITY_INSERT [dbo].[City] OFF;
 GO
 
-SET IDENTITY_INSERT [dbo].[InvoiceStatus] ON;
-INSERT INTO [dbo].[InvoiceStatus] ([Id], [Name], [IsActive])
-SELECT v.Id, v.Name, 1 FROM (VALUES (1, N'Pending'), (2, N'Unpaid'), (3, N'Partial'), (4, N'Paid'), (5, N'Overpaid')) v(Id, Name)
-WHERE NOT EXISTS (SELECT 1 FROM [dbo].[InvoiceStatus] t WHERE t.Id = v.Id);
-SET IDENTITY_INSERT [dbo].[InvoiceStatus] OFF;
-GO
-
 SET IDENTITY_INSERT [dbo].[StatusList] ON;
 INSERT INTO [dbo].[StatusList] ([StatusId], [StatusName], [IsActive])
 SELECT v.Id, v.Name, 1 FROM (VALUES (1, N'Paid'), (2, N'Unpaid'), (3, N'Pending'), (4, N'In Progress'), (5, N'Completed'),

@@ -26,7 +26,7 @@ namespace TRL_API.DAL
                        @Today AS AsOfDate
                 FROM RentInvoices ri
                 INNER JOIN Tenants t ON ri.TenantId = t.TenantId
-                LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
+                LEFT JOIN Units u ON u.UnitId = COALESCE(ri.UnitId, (SELECT cl.UnitId FROM dbo.TenantCurrentLease(t.TenantId) cl))
                 LEFT JOIN Floors f ON u.FloorId = f.FloorId
                 LEFT JOIN Buildings bd ON f.BuildingId = bd.BuildingId
                 CROSS APPLY dbo.InvoiceBalance(ri.Id, 0) bal
@@ -53,7 +53,7 @@ namespace TRL_API.DAL
                 LEFT JOIN Payments orig ON orig.Id = p.ReversalOfPaymentId
                 INNER JOIN Tenants t ON p.TenantId = t.TenantId
                 LEFT JOIN RentInvoices ri ON ri.Id = p.RentInvoiceId
-                LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
+                LEFT JOIN Units u ON u.UnitId = COALESCE(ri.UnitId, (SELECT cl.UnitId FROM dbo.TenantCurrentLease(t.TenantId) cl))
                 LEFT JOIN Floors f ON u.FloorId = f.FloorId
                 LEFT JOIN Buildings bd ON f.BuildingId = bd.BuildingId
                 LEFT JOIN Users us ON us.UserId = p.CreatedBy
@@ -70,7 +70,7 @@ namespace TRL_API.DAL
                 FROM Tenants
                 ORDER BY IsDeleted, Name;");
 
-        // Tenant details for the statement header. Units = units of active leases, else of any lease, else Tenants.UnitId.
+        // Tenant details for the statement header. Units = units of active leases, else of any lease.
         public async Task<DataTable> GetStatementTenantAsync(int tenantId) =>
             await _dbHelper.ExecuteQueryReturnDataTableAsync(@"
                 SELECT t.TenantId, t.Name AS TenantName, t.TenantType, t.ContactPerson, t.Contact, t.Email, t.CnicNtn, t.Address,
@@ -90,12 +90,7 @@ namespace TRL_API.DAL
                                   LEFT JOIN Floors f ON f.FloorId = u.FloorId
                                   LEFT JOIN Buildings bd ON bd.BuildingId = f.BuildingId
                                   WHERE l.TenantId = t.TenantId
-                                  FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, N''),
-                           (SELECT CONCAT(bd.BuildingName + N' – ', u.UnitNumber)
-                            FROM Units u
-                            LEFT JOIN Floors f ON f.FloorId = u.FloorId
-                            LEFT JOIN Buildings bd ON bd.BuildingId = f.BuildingId
-                            WHERE u.UnitId = t.UnitId)) AS Units,
+                                  FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, N'')) AS Units,
                        ISNULL((SELECT SUM(bal.OpenLateFee)
                                FROM RentInvoices ri CROSS APPLY dbo.InvoiceBalance(ri.Id, 0) bal
                                WHERE ri.TenantId = t.TenantId AND ri.StatusId IN (2, 8, 9)), 0) AS OpenLateFee,
@@ -179,7 +174,7 @@ namespace TRL_API.DAL
                            bal.Paid, bal.Disc, bal.Balance, bal.Waived, bal.OpenLateFee
                     FROM RentInvoices ri
                     INNER JOIN Tenants t ON t.TenantId = ri.TenantId
-                    LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
+                    LEFT JOIN Units u ON u.UnitId = COALESCE(ri.UnitId, (SELECT cl.UnitId FROM dbo.TenantCurrentLease(t.TenantId) cl))
                     LEFT JOIN Floors f ON f.FloorId = u.FloorId
                     CROSS APPLY dbo.InvoiceBalance(ri.Id, 0) bal
                     WHERE ri.InvoiceMonth >= @From AND ri.InvoiceMonth <= @To
@@ -190,7 +185,7 @@ namespace TRL_API.DAL
                     FROM Payments p
                     INNER JOIN Tenants t ON t.TenantId = p.TenantId
                     LEFT JOIN RentInvoices ri ON ri.Id = p.RentInvoiceId
-                    LEFT JOIN Units u ON u.UnitId = ISNULL(ri.UnitId, t.UnitId)
+                    LEFT JOIN Units u ON u.UnitId = COALESCE(ri.UnitId, (SELECT cl.UnitId FROM dbo.TenantCurrentLease(t.TenantId) cl))
                     LEFT JOIN Floors f ON f.FloorId = u.FloorId
                     WHERE p.PaymentDate >= @From AND p.PaymentDate < DATEADD(MONTH, 1, @To)
                       AND ISNULL(p.PaymentMethod, N'') NOT IN (N'Security Deposit', N'Credit to Deposit') -- not money received
@@ -246,7 +241,7 @@ namespace TRL_API.DAL
                 ORDER BY ISNULL(IsActive, 1) DESC, BuildingName;");
 
         // Rent roll: every unit in use (unit, floor and building active, like the Properties page) as of today.
-        //  - IsOccupied: same rule as PropertiesRepository (an active lease, or an active tenant still on the unit)
+        //  - IsOccupied: same rule as PropertiesRepository (an active lease)
         //  - Current lease = the term in force today: started, and active or renewed with its term still running
         //    (a renewed lease stays the current term until its next term starts, like Lease Management shows it)
         //  - Next lease = an active lease that starts after today (an upcoming renewal or a new booking)
@@ -258,11 +253,10 @@ namespace TRL_API.DAL
                 SELECT u.UnitId, b.BuildingId, b.BuildingName, f.FloorNumber, u.UnitNumber, u.PropertyType, u.BaseRent,
                        us.Name AS MarkedStatus,
                        CAST(CASE WHEN EXISTS (SELECT 1 FROM TenantLeases tl WHERE tl.UnitId = u.UnitId AND tl.IsActive = 1)
-                                   OR EXISTS (SELECT 1 FROM Tenants t WHERE t.UnitId = u.UnitId AND t.IsActive = 1 AND t.IsDeleted = 0)
                                  THEN 1 ELSE 0 END AS BIT) AS IsOccupied,
-                       cur.LeaseId, cur.TenantId, ISNULL(ct.Name, ft.Name) AS TenantName, ISNULL(ct.Contact, ft.Contact) AS Contact,
+                       cur.LeaseId, cur.TenantId, ct.Name AS TenantName, ct.Contact AS Contact,
                        cur.StartDate, cur.EndDate, cur.TenureMonths, cur.IsActive AS LeaseIsActive,
-                       ISNULL(cur.RentAmount, ft.MonthlyRent) AS CurrentRent,
+                       cur.RentAmount AS CurrentRent,
                        nxt.LeaseId AS NextLeaseId, nt.Name AS NextTenantName, nxt.StartDate AS NextStartDate,
                        nxt.EndDate AS NextEndDate, nxt.RentAmount AS NextRent,
                        ISNULL(ar.Arrears, 0) AS Arrears,
@@ -277,11 +271,6 @@ namespace TRL_API.DAL
                                AND (tl.IsActive = 1 OR (tl.TerminationReason = 'Renewed' AND tl.BilledThrough >= @Today))
                              ORDER BY tl.IsActive DESC, tl.StartDate DESC) cur
                 LEFT JOIN Tenants ct ON ct.TenantId = cur.TenantId
-                -- No lease: an active tenant still pointing at the unit (old data before leases)
-                OUTER APPLY (SELECT TOP 1 t.Name, t.Contact, t.MonthlyRent
-                             FROM Tenants t
-                             WHERE cur.LeaseId IS NULL AND t.UnitId = u.UnitId AND t.IsActive = 1 AND t.IsDeleted = 0
-                             ORDER BY t.TenantId DESC) ft
                 OUTER APPLY (SELECT TOP 1 tl.LeaseId, tl.TenantId, tl.StartDate, tl.EndDate, tl.RentAmount
                              FROM TenantLeases tl
                              WHERE tl.UnitId = u.UnitId AND tl.IsActive = 1 AND tl.StartDate > @Today

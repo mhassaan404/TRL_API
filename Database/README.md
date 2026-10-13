@@ -9,6 +9,8 @@ the browser sends.
 | Catalog (e.g. `TRL_Catalog`) | `dbo.Clients`: client code, name, database name, connection key, active flag. No business data, no passwords | `catalog/01_catalog.sql` |
 | One per client (e.g. `TRL_DB` = client `TRL`) | All business data: buildings … invoices, payments, maintenance, users, refresh tokens, `SchemaMigrations` | `01`–`06` below + `migrations/` |
 
+Backups, restore tests (`tools/verify-backup.ps1`), logs and monitoring: [../OPERATIONS.md](../OPERATIONS.md).
+
 Connection strings are **server settings**, not database rows:
 
 ```
@@ -62,13 +64,26 @@ earlier migrations after checking their changes were present.
 **Rollback scripts** live in `rollback/` (never in `migrations/`, so `TRL_Tools migrate` can't run them). Use one only
 in an emergency and together with redeploying an API whose `SchemaVersion.Required` is the previous migration.
 
+**Pending scripts** live in `pending/`: changes that must wait until an API that no longer needs the old schema is live
+(today: `2026-10-13b_drop_tenant_unit_copy`, which removes `Tenants.UnitId/FloorId/BuildingId/MonthlyRent`). Run one by
+hand after that deployment is checked; it records itself in `SchemaMigrations`. Later, move it into `migrations/` with
+the next release (setting `SchemaVersion.Required` to it and regenerating `01`/`04`) so new databases match.
+
+**Constraint names** are fixed (`PK_<Table>`, `UQ_<Table>_<Column>`, `DF_<Table>_<Column>`, `FK_<Table>_<Column>`,
+`CK_...`) since `2026-10-13_cleanup`, so later scripts can refer to them by name. Always name new constraints.
+
+**A tenant's unit and rent** come from their lease: `dbo.TenantCurrentLease(@TenantId)` (the most recently made active
+lease; for a moved-out tenant, their last lease that wasn't a cancelled renewal). The old copy in `Tenants` is no longer
+read or written.
+
 **Rules the database enforces** (`2026-10-12c_db_constraints`): invoices must belong to an existing tenant and status
 (StatusId NOT NULL), audit rows to an existing invoice; invoice rent and charged late fee are never negative, nor the
 late-fee terms; charge types and payment methods must be known values (`PaymentMethod` may be NULL: older
 discount/waiver-only rows); lease rent > 0 and tenure ≥ 1 month; refresh tokens are unique. Deliberately not enforced,
 because older rows legitimately break them: a sign rule on payments (old adjustments), discount % range, the cached
-`PendingAmount`/`OverPaidAmount` columns, `DueDate >= InvoiceDate`. `RentPayments`, `InvoiceStatus` and
-`vw_UnitOccupancy` are unused but kept for now.
+`PendingAmount`/`OverPaidAmount` columns, `DueDate >= InvoiceDate`. The unused `RentPayments`, `InvoiceStatus` and
+`vw_UnitOccupancy` were removed by `2026-10-13_cleanup`; `Users.Email` is optional (unique when filled in) and
+`Tenants.CreatedBy/UpdatedBy` hold user ids.
 
 ## Schema files
 
@@ -81,10 +96,10 @@ sqlcmd -S <server> -d <database> -E -I -f 65001 -i 01_tables.sql -i 02_functions
 | File | Contents |
 |---|---|
 | `01_tables.sql` | Tables, primary keys, unique/other indexes, defaults, check constraints |
-| `02_functions.sql` | `dbo.CalculateLateFee` (late fee from days overdue, the invoice's daily rate and cap), `dbo.LeaseMonthCharge` (covered days and prorated rent of a lease in a month), `dbo.InvoiceBalance` (paid, discount, balance and open late fee of an invoice: the one definition every query uses) |
-| `03_views.sql` | `dbo.vw_UnitOccupancy` |
+| `02_functions.sql` | `dbo.CalculateLateFee` (late fee from days overdue, the invoice's daily rate and cap), `dbo.LeaseMonthCharge` (covered days and prorated rent of a lease in a month), `dbo.InvoiceBalance` (paid, discount, balance and open late fee of an invoice: the one definition every query uses), `dbo.BusinessToday` (today in Pakistan), `dbo.TenantCurrentLease` (a tenant's current lease: unit and rent) |
+| `03_views.sql` | No views (kept so the order 01–06 stays the same) |
 | `04_foreign_keys.sql` | Foreign keys (kept separate so table order doesn't matter) |
-| `06_seed_lookups.sql` | Lookup rows the code relies on by id (cities, building types, unit/invoice statuses) and the `LateFeeSettings` row (5 due days, 500 per day, max 2 × invoice rent) |
+| `06_seed_lookups.sql` | Lookup rows the code relies on by id (cities, building types, unit statuses, invoice statuses in `StatusList`) and the `LateFeeSettings` row (5 due days, 500 per day, max 2 × invoice rent) |
 
 Late fees: `LateFeeSettings` holds the current rules (Late Fee Settings page). Each invoice stores the daily rate and cap in force when it was created (`RentInvoices.LateFeePerDay`, `LateFeeMaxMultiplier`) next to its `DueDate`, so changing the settings only affects invoices generated afterwards.
 

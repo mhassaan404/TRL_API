@@ -61,14 +61,6 @@ GO
 ALTER TABLE [dbo].[MaintenanceLog] CHECK CONSTRAINT [FK_MaintenanceLog_Job]
 GO
 
-ALTER TABLE [dbo].[Payments]  WITH CHECK ADD  CONSTRAINT [FK__Payments__Tenant__182C9B23] FOREIGN KEY([TenantId])
-REFERENCES [dbo].[Tenants] ([TenantId])
-ON UPDATE CASCADE
-ON DELETE CASCADE
-GO
-ALTER TABLE [dbo].[Payments] CHECK CONSTRAINT [FK__Payments__Tenant__182C9B23]
-GO
-
 ALTER TABLE [dbo].[Payments]  WITH CHECK ADD  CONSTRAINT [FK_Payments_RentInvoice] FOREIGN KEY([RentInvoiceId])
 REFERENCES [dbo].[RentInvoices] ([Id])
 GO
@@ -79,6 +71,14 @@ ALTER TABLE [dbo].[Payments]  WITH CHECK ADD  CONSTRAINT [FK_Payments_ReversalOf
 REFERENCES [dbo].[Payments] ([Id])
 GO
 ALTER TABLE [dbo].[Payments] CHECK CONSTRAINT [FK_Payments_ReversalOf]
+GO
+
+ALTER TABLE [dbo].[Payments]  WITH CHECK ADD  CONSTRAINT [FK_Payments_TenantId] FOREIGN KEY([TenantId])
+REFERENCES [dbo].[Tenants] ([TenantId])
+ON UPDATE CASCADE
+ON DELETE CASCADE
+GO
+ALTER TABLE [dbo].[Payments] CHECK CONSTRAINT [FK_Payments_TenantId]
 GO
 
 ALTER TABLE [dbo].[RefreshTokens]  WITH CHECK ADD  CONSTRAINT [FK_RefreshTokens_Users] FOREIGN KEY([UserId])
@@ -115,10 +115,6 @@ ALTER TABLE [dbo].[RentInvoices]  WITH CHECK ADD  CONSTRAINT [FK_RentInvoices_Un
 REFERENCES [dbo].[Units] ([UnitId])
 GO
 ALTER TABLE [dbo].[RentInvoices] CHECK CONSTRAINT [FK_RentInvoices_Units]
-GO
-
-ALTER TABLE [dbo].[RentPayments]  WITH CHECK ADD FOREIGN KEY([RentInvoiceId])
-REFERENCES [dbo].[RentInvoices] ([Id])
 GO
 
 ALTER TABLE [dbo].[TenantLeases]  WITH CHECK ADD  CONSTRAINT [FK_TenantLeases_Tenant] FOREIGN KEY([TenantId])

@@ -17,9 +17,19 @@ namespace TRL_API.DAL
 
         public async Task<DataTable> GetTenants()
         {
-            string query = @"select t.*, b.BuildingName, f.FloorNumber, u.UnitNumber, c.Name AS CityName from [dbo].[Tenants] t  LEFT JOIN Buildings b on t.BuildingId=b.BuildingId
-                 LEFT JOIN Floors f on t.FloorId=f.FloorId  LEFT JOIN Units u on t.UnitId=u.UnitId LEFT JOIN City c ON t.CityId = c.Id
-                 WHERE t.IsDeleted = 0";
+            // Unit, floor, building and rent are those of the tenant's current lease (dbo.TenantCurrentLease), not a copy
+            string query = @"
+                SELECT t.TenantId, t.Name, t.TenantType, t.ContactPerson, t.CnicNtn, t.Address, t.Contact, t.Email, t.CityId,
+                       t.MoveOutDate, t.Notes, t.IsActive, t.IsDeleted, t.CreatedBy, t.CreatedAt, t.UpdatedBy, t.UpdatedAt,
+                       b.BuildingId, f.FloorId, cl.UnitId, cl.RentAmount AS MonthlyRent,
+                       b.BuildingName, f.FloorNumber, u.UnitNumber, c.Name AS CityName
+                FROM [dbo].[Tenants] t
+                OUTER APPLY dbo.TenantCurrentLease(t.TenantId) cl
+                LEFT JOIN Units u ON u.UnitId = cl.UnitId
+                LEFT JOIN Floors f ON f.FloorId = u.FloorId
+                LEFT JOIN Buildings b ON b.BuildingId = f.BuildingId
+                LEFT JOIN City c ON t.CityId = c.Id
+                WHERE t.IsDeleted = 0";
             var dt = await _dbHelper.ExecuteQueryReturnDataTableAsync(query);
             return dt;
         }
@@ -33,9 +43,9 @@ namespace TRL_API.DAL
 
             string query = @"
                 INSERT INTO [dbo].[Tenants]
-                    (Name, TenantType, ContactPerson, CnicNtn, Address, BuildingId, FloorId, UnitId, Contact, Email, MonthlyRent, MoveOutDate, CityId, CreatedBy, CreatedAt, Notes, IsActive)
+                    (Name, TenantType, ContactPerson, CnicNtn, Address, Contact, Email, MoveOutDate, CityId, CreatedBy, CreatedAt, Notes, IsActive)
                 VALUES
-                    (@Name, @TenantType, @ContactPerson, @CnicNtn, @Address, @BuildingId, @FloorId, @UnitId, @Contact, @Email, @MonthlyRent, @MoveOutDate, @CityId, @CreatedBy, GETUTCDATE(), @Notes, @IsActive)";
+                    (@Name, @TenantType, @ContactPerson, @CnicNtn, @Address, @Contact, @Email, @MoveOutDate, @CityId, @CreatedBy, GETUTCDATE(), @Notes, @IsActive)";
 
             var parameters = new[]
             {
@@ -44,13 +54,9 @@ namespace TRL_API.DAL
                 new SqlParameter("@ContactPerson", tenant.ContactPerson ?? (object)DBNull.Value),
                 new SqlParameter("@CnicNtn", tenant.CnicNtn ?? (object)DBNull.Value),
                 new SqlParameter("@Address", tenant.Address ?? (object)DBNull.Value),
-                // Unit and rent are set by leases only (Lease Management), never by the tenant form
-                new SqlParameter("@BuildingId", DBNull.Value),
-                new SqlParameter("@FloorId", DBNull.Value),
-                new SqlParameter("@UnitId", DBNull.Value),
+                // Unit and rent come from leases only (Lease Management), never from the tenant form
                 new SqlParameter("@Contact", tenant.Contact ?? (object)DBNull.Value),
                 new SqlParameter("@Email", tenant.Email ?? (object)DBNull.Value),
-                new SqlParameter("@MonthlyRent", DBNull.Value),
                 new SqlParameter("@MoveOutDate", tenant.MoveOutDate ?? (object)DBNull.Value),
                 new SqlParameter("@CityId", tenant.CityId == 0 ? (object)DBNull.Value : tenant.CityId),
                 new SqlParameter("@CreatedBy", tenant.CreatedBy == 0 ? (object)DBNull.Value : tenant.CreatedBy),
@@ -63,10 +69,9 @@ namespace TRL_API.DAL
 
         public async Task<ApiResponse> UpdateTenantAsync(Tenants tenant)
         {
+            // The tenant's unit and rent come from leases (dbo.TenantCurrentLease): a reactivated tenant without an active
+            // lease has no unit until a lease gives one
             string query = @"
-            DECLARE @Reactivated BIT = CASE WHEN @IsActive = 1
-                AND EXISTS (SELECT 1 FROM Tenants WHERE TenantId = @TenantId AND ISNULL(IsActive, 0) = 0)
-                AND NOT EXISTS (SELECT 1 FROM TenantLeases WHERE TenantId = @TenantId AND IsActive = 1) THEN 1 ELSE 0 END;
             UPDATE [dbo].[Tenants]
             SET
                 Name = @Name,
@@ -85,12 +90,6 @@ namespace TRL_API.DAL
                 UpdatedBy = @UpdatedBy,
                 UpdatedAt = GETUTCDATE(),
                 Notes=@Notes,
-                -- Reactivating a moved-out tenant with no active lease: forget the old unit and rent (they belong to the
-                -- ended tenancy), so that unit doesn't show as occupied. A lease sets them again.
-                UnitId      = CASE WHEN @Reactivated = 1 THEN NULL ELSE UnitId END,
-                FloorId     = CASE WHEN @Reactivated = 1 THEN NULL ELSE FloorId END,
-                BuildingId  = CASE WHEN @Reactivated = 1 THEN NULL ELSE BuildingId END,
-                MonthlyRent = CASE WHEN @Reactivated = 1 THEN NULL ELSE MonthlyRent END,
                 IsActive = @IsActive
             WHERE TenantId = @TenantId AND IsDeleted = 0";
 

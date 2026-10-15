@@ -1,6 +1,6 @@
 // Security deposits (agreed, received, corrections, receipts) and move-out settlement (finalize, deductions,
 // deposit applied to dues, final payment, refunds), checked against the database
-import { DB, TODAY, apiTenancy, area, balanceOf, errorText, monthStart, num, ok, one, section, sql } from '../lib.mjs'
+import { ADMIN_USER, DB, TODAY, apiTenancy, area, balanceOf, errorText, monthStart, num, ok, one, section, sql } from '../lib.mjs'
 
 const parts = (d) => ({ month: Number(d.slice(5, 7)), year: Number(d.slice(0, 4)) })
 const round2 = (v) => Math.round(v * 100) / 100
@@ -54,8 +54,14 @@ export default async ({ a }) => {
     for (const d of [monthStart(TODAY, -1), TODAY]) await a.post('/Rent/GenerateInvoices', { tenantIds: [t1.tenantId], ...parts(d) })
     let r = await a.post('/Settlements/Finalize', { tenantId: t1.tenantId, unitId: t1.unitId, leaseId: t1.leaseId, expectedOutstanding: 0, expectedCredit: 0, expectedHeld: 20000, settlementDate: TODAY })
     ok(r.status === 400 && /current or upcoming lease/.test(errorText(r)), 'cannot settle while the lease is current', r.json)
+    // "Current / Moved out" flag on Rent History and Payment Records rows (per tenant + unit)
+    const historyOf = async (t) => ((await a.get('/RentHistory/History')).json || []).filter((x) => x.tenant === t.name)
+    let mine = await historyOf(t1)
+    ok(mine.length === 2 && mine.every((x) => x.leaseCurrent === true), 'Rent History: invoices of a current tenancy are marked current', mine.map((x) => x.leaseCurrent))
     r = await a.post('/Lease/Terminate', { leaseId: t1.leaseId, reason: 'E2E move-out', moveOutDate: TODAY })
     ok(r.status === 200, 'lease ended', r.json)
+    mine = await historyOf(t1)
+    ok(mine.length === 2 && mine.every((x) => x.leaseCurrent === false), 'Rent History: after the lease ends they are marked moved out', mine.map((x) => x.leaseCurrent))
     r = await record(t1, 1000)
     ok(r.status === 400 && /ended or was cancelled/.test(errorText(r)), 'no new deposit on an ended lease', r.json)
     // A charge cancelled before the settlement (used below: it must not come back afterwards)
@@ -78,7 +84,12 @@ export default async ({ a }) => {
     ok(r.status === 400 && /can't be more than what the tenant owes/.test(errorText(r)), 'final payment above what is owed refused', r.json)
     r = await a.post('/Settlements/Finalize', { ...body, finalPayment: { amount: 5000, paymentMethod: 'Cash', reference: 'E2E' } })
     s1 = r.json?.id
+    ok(num(db, `SELECT COUNT(*) FROM RentInvoices ri JOIN Users u ON u.UserId = ri.CreatedBy WHERE ri.TenantId = ${t1.tenantId} AND ri.ChargeType = N'Cleaning' AND u.Username = N'${ADMIN_USER}'`) === 1,
+       'settlement deduction invoice records who created it')
     ok(r.status === 200 && s1 > 0 && r.json.receiptIds?.length === 1, 'settlement finalized with a deduction and a final payment', r.json)
+    const pays = ((await a.get(`/Rent/GetAllPayments?from=${monthStart(TODAY, -2)}&to=${TODAY}`)).json || []).filter((x) => x.tenantId === t1.tenantId)
+    ok(pays.length > 0 && pays.every((x) => x.leaseCurrent === false), 'Payment Records: payments of a moved-out tenancy are marked moved out', pays.map((x) => x.leaseCurrent))
+    ok((await historyOf(t1)).every((x) => x.leaseCurrent === false), 'Rent History: the settlement deduction invoice is marked moved out too')
     const [st] = sql(db, `SELECT OutstandingBefore, DeductionsTotal, DepositHeldBefore, DepositApplied, TenantOwes, RefundDue, FinalPaymentReceived FROM MoveOutSettlements WHERE Id = ${s1}`)
     ok(st.map(Number).join('|') === [outstanding, 2000, 20000, 20000, owes, 0, 5000].join('|'), 'settlement figures: owed = dues + deductions - deposit', st)
     ok(held(t1) === 0, 'deposit fully applied (held 0)')

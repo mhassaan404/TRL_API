@@ -46,5 +46,14 @@ namespace TRL_API.DAL
                 EXISTS (SELECT 1 FROM Payments ap
                         WHERE ap.RentInvoiceId = ri.Id AND ap.ReversalOfPaymentId IS NULL
                           AND NOT EXISTS (SELECT 1 FROM Payments ar WHERE ar.ReversalOfPaymentId = ap.Id))";
+
+        // 1 = the tenancy of invoice "ri" (its tenant + unit "u") still has an active lease (running or booked);
+        // 0 = moved out of that unit. Without a unit: whether the tenant has any active lease. For the
+        // "Current / Moved out" filter on Rent History and Payment Records.
+        public const string LeaseCurrent = @"
+                CAST(CASE WHEN EXISTS (SELECT 1 FROM TenantLeases al
+                                       WHERE al.TenantId = ri.TenantId AND al.IsActive = 1
+                                         AND (u.UnitId IS NULL OR al.UnitId = u.UnitId))
+                          THEN 1 ELSE 0 END AS BIT)";
     }
 }

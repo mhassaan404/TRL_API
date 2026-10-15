@@ -274,7 +274,7 @@ namespace TRL_API.BLL
         // tenantIds: null or empty = all tenants. Otherwise only those tenants' leases.
         // Leases already billed this month are skipped, so re-running is always safe.
         // dueInDays: null = the Payment Due Days setting (an explicit value is still accepted, as before)
-        public async Task<ApiResponse> GenerateInvoicesAsync(int month, int year, int? dueInDays, List<int>? tenantIds)
+        public async Task<ApiResponse> GenerateInvoicesAsync(int month, int year, int? dueInDays, List<int>? tenantIds, int? userId = null)
         {
             if (month < 1 || month > 12 || year < 2000 || year > 2100)
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "Select a valid month and year." };
@@ -356,7 +356,7 @@ namespace TRL_API.BLL
                 try
                 {
                     var result = await _dal.CreateInvoice(tenantId, amount, invoiceDate, dueDate,
-                        settings.LateFeePerDay, settings.MaxLateFeeMultiplier, description, leaseId: leaseId, unitId: unitId);
+                        settings.LateFeePerDay, settings.MaxLateFeeMultiplier, description, leaseId: leaseId, unitId: unitId, createdBy: userId);
                     if (result.IsSuccess) created++;
                 }
                 catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number is 2601 or 2627)
@@ -410,7 +410,7 @@ namespace TRL_API.BLL
         // Creates one separate invoice per tenant: invoice date = charge date (default today), due date = charge date +
         // due days (default the Payment Due Days setting), late fee per the current setting unless switched off.
         // All or nothing; the related invoice (if any) is never changed.
-        public async Task<ApiResponse> CreateExtraChargeAsync(ExtraChargeRequest req)
+        public async Task<ApiResponse> CreateExtraChargeAsync(ExtraChargeRequest req, int? userId = null)
         {
             var error = ValidateExtraCharge(req, BusinessDate.Today);
             if (error != null)
@@ -423,7 +423,7 @@ namespace TRL_API.BLL
             var description = string.IsNullOrWhiteSpace(req.Description) ? null : req.Description.Trim();
 
             var dt = await _dal.CreateExtraChargesAsync(tenantIds, chargeDate, dueDate, req.ChargeType, description, req.Amount,
-                req.RelatedInvoiceId, req.ApplyLateFee ? settings.LateFeePerDay : 0, settings.MaxLateFeeMultiplier);
+                req.RelatedInvoiceId, req.ApplyLateFee ? settings.LateFeePerDay : 0, settings.MaxLateFeeMultiplier, userId);
             var result = dt.Rows.Count > 0 ? dt.Rows[0]["Result"].ToString() : null;
 
             return result switch

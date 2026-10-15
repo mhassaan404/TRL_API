@@ -1,6 +1,6 @@
 // Rent generation and the invoice lifecycle: generate, re-run safely, extra charges, late fee charge / reverse,
 // due-date change, cancel / reinstate, late-fee settings snapshot
-import { DB, TODAY, addDays, apiTenancy, area, balanceOf, errorText, expectedLateFee, monthStart, num, ok, one, section, sql } from '../lib.mjs'
+import { ADMIN_USER, DB, TODAY, addDays, apiTenancy, area, balanceOf, errorText, expectedLateFee, monthStart, num, ok, one, section, sql } from '../lib.mjs'
 
 const parts = (d) => ({ month: Number(d.slice(5, 7)), year: Number(d.slice(0, 4)) })
 
@@ -12,6 +12,8 @@ export default async ({ a }) => {
   const gen = (d, tenantIds = [t.tenantId], extra = {}) => a.post('/Rent/GenerateInvoices', { tenantIds, ...parts(d), ...extra })
   const invoiceFor = (d) => num(db, `SELECT ISNULL(MAX(Id), 0) FROM RentInvoices WHERE LeaseId = ${t.leaseId} AND InvoiceMonth = '${d}' AND StatusId <> 6`)
   const settings = (await a.get('/LateFeeSettings/Get')).json
+  const adminId = num(db, `SELECT UserId FROM Users WHERE Username = N'${ADMIN_USER}'`)
+  const createdBy = (id) => num(db, `SELECT ISNULL(CreatedBy, 0) FROM RentInvoices WHERE Id = ${id}`)
 
   section('generate rent')
   let r = await gen(monthStart(TODAY, -13))
@@ -27,6 +29,9 @@ export default async ({ a }) => {
   r = await gen(TODAY)
   const cur = invoiceFor(monthStart(TODAY))
   ok(r.status === 200 && r.json?.rowsAffected === 1 && cur > 0, 'this month generated', r.json)
+  ok(adminId > 0 && createdBy(cur) === adminId, 'generated invoice records who created it', createdBy(cur))
+  const curDetails = (await a.get(`/RentHistory/InvoiceDetails?invoiceId=${cur}`)).json
+  ok(curDetails?.invoice?.createdBy === ADMIN_USER, 'invoice History shows who created it', curDetails?.invoice?.createdBy)
   const [row] = sql(db, `SELECT TotalRent, CONVERT(varchar(10), InvoiceDate, 23), CONVERT(varchar(10), DueDate, 23), LateFeePerDay, LateFeeMaxMultiplier, StatusId, UnitId FROM RentInvoices WHERE Id = ${cur}`)
   ok(Number(row[0]) === 40000 && row[1] === monthStart(TODAY) && row[2] === addDays(monthStart(TODAY), settings.paymentDueDays) &&
      Number(row[3]) === settings.lateFeePerDay && Number(row[4]) === settings.maxLateFeeMultiplier && row[5] === '2' && Number(row[6]) === t.unitId,
@@ -114,6 +119,7 @@ export default async ({ a }) => {
     r = await a.post('/Rent/CreateExtraCharge', base)
     const xc = num(db, `SELECT MAX(Id) FROM RentInvoices WHERE TenantId = ${t.tenantId} AND ChargeType = 'Damage'`)
     ok(r.status === 200 && xc > 0, 'extra charge created as its own invoice', r.json)
+    ok(createdBy(xc) === adminId, 'extra charge records who created it', createdBy(xc))
     ok(one(db, `SELECT CONCAT(TotalRent, '|', ISNULL(LeaseId, 0), '|', RelatedInvoiceId, '|', UnitId, '|', StatusId) FROM RentInvoices WHERE Id = ${xc}`) === `2500.00|0|${cur}|${t.unitId}|2`,
        'not linked to the lease, linked to the related invoice, on its unit, Unpaid')
     ok(num(db, `SELECT TotalRent FROM RentInvoices WHERE Id = ${cur}`) === 40000, 'related rent invoice unchanged')
@@ -124,6 +130,14 @@ export default async ({ a }) => {
     ok(r.status === 200 && num(db, `SELECT LateFeePerDay FROM RentInvoices WHERE Id = ${noFee}`) === 0, '"no late fee" charge stores a zero rate', r.json)
     const det = (await a.get(`/RentHistory/InvoiceDetails?invoiceId=${cur}`)).json
     ok(det.linkedCharges?.some((c) => c.invoiceId === xc), 'rent invoice History lists the linked charge', det.linkedCharges)
+
+    // Maintenance billed to the tenant: also records who created the invoice
+    r = await a.post('/Maintenance/Save', { buildingId: t.buildingId, floorId: t.floorId, unitId: t.unitId, tenantId: t.tenantId, title: 'E2E tap', category: 'Plumbing', cost: 1500 })
+    const job = num(db, `SELECT ISNULL(MAX(Id), 0) FROM MaintenanceJobs WHERE TenantId = ${t.tenantId}`)
+    ok(r.status === 200 && job > 0, 'maintenance job created', r.json)
+    r = await a.post('/Maintenance/Bill', { id: job, amount: 1500, description: 'E2E tap repair' })
+    const billed = num(db, `SELECT ISNULL(ChargeInvoiceId, 0) FROM MaintenanceJobs WHERE Id = ${job}`)
+    ok(r.status === 200 && billed > 0 && createdBy(billed) === adminId, 'maintenance invoice records who created it', { status: r.status, billed, by: billed && createdBy(billed) })
   }
 
   section('cancel and reinstate')

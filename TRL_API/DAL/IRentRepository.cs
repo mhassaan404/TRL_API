@@ -26,10 +26,10 @@ namespace TRL_API.DAL
         Task<DataTable> GetActiveTenantsList();
         Task<DataTable> GetLeaseChargesForMonth(int month, int year);
         Task<DataTable> GetTenantNamesAsync();
-        Task<ApiResponse> CreateInvoice(int tenantId, decimal totalRent, DateTime invoiceDate, DateTime dueDate, decimal lateFeePerDay, decimal lateFeeMaxMultiplier, string? description = null, string? chargeType = null, int? leaseId = null, int? unitId = null);
+        Task<ApiResponse> CreateInvoice(int tenantId, decimal totalRent, DateTime invoiceDate, DateTime dueDate, decimal lateFeePerDay, decimal lateFeeMaxMultiplier, string? description = null, string? chargeType = null, int? leaseId = null, int? unitId = null, int? createdBy = null);
         Task<DataTable> ChargeLateFeeAsync(int invoiceId);
         Task<DataTable> CreateExtraChargesAsync(IReadOnlyList<int> tenantIds, DateTime chargeDate, DateTime dueDate, string chargeType,
-            string? description, decimal amount, int? relatedInvoiceId, decimal lateFeePerDay, decimal lateFeeMaxMultiplier);
+            string? description, decimal amount, int? relatedInvoiceId, decimal lateFeePerDay, decimal lateFeeMaxMultiplier, int? createdBy = null);
         Task<DataTable> GetAllPaymentsAsync(DateTime? from, DateTime? to);
     }
 }

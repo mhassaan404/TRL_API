@@ -168,7 +168,7 @@ namespace TRL_API.Controllers
         public async Task<IActionResult> GenerateInvoices([FromBody] GenerateInvoicesRequest request)
         {
             var response = await _service.GenerateInvoicesAsync(
-                request.Month, request.Year, request.DueInDays, request.TenantIds);
+                request.Month, request.Year, request.DueInDays, request.TenantIds, User.GetUserId());
 
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
@@ -179,7 +179,7 @@ namespace TRL_API.Controllers
         [HttpPost("CreateExtraCharge")]
         public async Task<IActionResult> CreateExtraCharge([FromBody] ExtraChargeRequest request)
         {
-            var response = await _service.CreateExtraChargeAsync(request);
+            var response = await _service.CreateExtraChargeAsync(request, User.GetUserId());
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
 

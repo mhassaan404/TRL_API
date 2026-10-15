@@ -220,8 +220,8 @@ namespace TRL_API.DAL
                 WHILE @Seq < @Max
                 BEGIN
                     INSERT INTO RentInvoices (TenantId, LeaseId, UnitId, TotalRent, PendingAmount, OverPaidAmount, InvoiceDate, DueDate, StatusId,
-                                              Description, ChargeType, CreatedAt, LateFeePerDay, LateFeeMaxMultiplier, RelatedInvoiceId)
-                    SELECT @TenantId, NULL, @UnitId, d.Amount, d.Amount, 0, @Date, @Date, 2, d.Reason, d.ChargeType, GETDATE(), 0, @Mult, NULL
+                                              Description, ChargeType, CreatedAt, LateFeePerDay, LateFeeMaxMultiplier, RelatedInvoiceId, CreatedBy)
+                    SELECT @TenantId, NULL, @UnitId, d.Amount, d.Amount, 0, @Date, @Date, 2, d.Reason, d.ChargeType, GETDATE(), 0, @Mult, NULL, @UserId
                     FROM @Ded d WHERE d.Seq = @Seq;
                     SET @NewInv = SCOPE_IDENTITY();
                     UPDATE @Ded SET InvoiceId = @NewInv WHERE Seq = @Seq;

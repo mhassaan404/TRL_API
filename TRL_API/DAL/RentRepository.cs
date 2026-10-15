@@ -511,7 +511,7 @@ namespace TRL_API.DAL
         // the unit defaults to the tenant's current unit so the invoice still shows where it belongs.
         public async Task<ApiResponse> CreateInvoice(
             int tenantId, decimal totalRent, DateTime invoiceDate, DateTime dueDate, decimal lateFeePerDay, decimal lateFeeMaxMultiplier,
-            string? description = null, string? chargeType = null, int? leaseId = null, int? unitId = null)
+            string? description = null, string? chargeType = null, int? leaseId = null, int? unitId = null, int? createdBy = null)
         {
             // StatusId 2 = Unpaid. NOT 3 (Pending): GetRentCollectionAsync only
             // shows StatusId IN (2,8,9), so a Pending invoice would never surface
@@ -522,11 +522,11 @@ namespace TRL_API.DAL
             string query = @"
                 INSERT INTO RentInvoices
                     (TenantId, LeaseId, UnitId, TotalRent, PendingAmount, OverPaidAmount, InvoiceDate, DueDate, StatusId, Description, ChargeType, CreatedAt,
-                     LateFeePerDay, LateFeeMaxMultiplier)
+                     LateFeePerDay, LateFeeMaxMultiplier, CreatedBy)
                 VALUES
                     (@TenantId, @LeaseId, ISNULL(@UnitId, (SELECT cl.UnitId FROM dbo.TenantCurrentLease(@TenantId) cl)),
                      @TotalRent, @TotalRent, 0, @InvoiceDate, @DueDate, 2, @Description, @ChargeType, GETDATE(),
-                     @LateFeePerDay, @LateFeeMaxMultiplier);";
+                     @LateFeePerDay, @LateFeeMaxMultiplier, @CreatedBy);";
 
             var parameters = new[]
             {
@@ -538,6 +538,7 @@ namespace TRL_API.DAL
                 new SqlParameter("@ChargeType", (object?)chargeType ?? DBNull.Value),
                 new SqlParameter("@LeaseId", (object?)leaseId ?? DBNull.Value),
                 new SqlParameter("@UnitId", (object?)unitId ?? DBNull.Value),
+                new SqlParameter("@CreatedBy", SqlDbType.Int) { Value = (object?)createdBy ?? DBNull.Value },
                 new SqlParameter("@LateFeePerDay", SqlDbType.Decimal) { Precision = 18, Scale = 2, Value = lateFeePerDay },
                 new SqlParameter("@LateFeeMaxMultiplier", SqlDbType.Decimal) { Precision = 5, Scale = 2, Value = lateFeeMaxMultiplier },
             };
@@ -551,7 +552,8 @@ namespace TRL_API.DAL
         // the related invoice must belong to the tenant. No existing invoice or payment is changed.
         // Result: one row per created invoice ('OK', Info = invoice id), or one row with the reason it was refused.
         public async Task<DataTable> CreateExtraChargesAsync(IReadOnlyList<int> tenantIds, DateTime chargeDate, DateTime dueDate,
-            string chargeType, string? description, decimal amount, int? relatedInvoiceId, decimal lateFeePerDay, decimal lateFeeMaxMultiplier)
+            string chargeType, string? description, decimal amount, int? relatedInvoiceId, decimal lateFeePerDay, decimal lateFeeMaxMultiplier,
+            int? createdBy = null)
         {
             var tenantValues = string.Join(", ", tenantIds.Select((_, i) => $"(@T{i})"));
             string query = $@"
@@ -583,11 +585,11 @@ namespace TRL_API.DAL
                 -- billing (which only looks at ChargeType IS NULL) is unaffected. StatusId 2 = Unpaid.
                 INSERT INTO RentInvoices
                     (TenantId, LeaseId, UnitId, TotalRent, PendingAmount, OverPaidAmount, InvoiceDate, DueDate, StatusId,
-                     Description, ChargeType, CreatedAt, LateFeePerDay, LateFeeMaxMultiplier, RelatedInvoiceId)
+                     Description, ChargeType, CreatedAt, LateFeePerDay, LateFeeMaxMultiplier, RelatedInvoiceId, CreatedBy)
                 OUTPUT inserted.Id INTO @New
                 SELECT x.TenantId, NULL, COALESCE((SELECT UnitId FROM RentInvoices WHERE Id = @RelatedInvoiceId), (SELECT cl.UnitId FROM dbo.TenantCurrentLease(x.TenantId) cl)),
                        @Amount, @Amount, 0, @ChargeDate, @DueDate, 2,
-                       @Description, @ChargeType, GETDATE(), @LateFeePerDay, @LateFeeMaxMultiplier, @RelatedInvoiceId
+                       @Description, @ChargeType, GETDATE(), @LateFeePerDay, @LateFeeMaxMultiplier, @RelatedInvoiceId, @CreatedBy
                 FROM @T x JOIN Tenants t ON t.TenantId = x.TenantId;
 
                 COMMIT;
@@ -604,6 +606,7 @@ namespace TRL_API.DAL
                 new SqlParameter("@RelatedInvoiceId", SqlDbType.Int) { Value = (object?)relatedInvoiceId ?? DBNull.Value },
                 new SqlParameter("@LateFeePerDay", SqlDbType.Decimal) { Precision = 18, Scale = 2, Value = lateFeePerDay },
                 new SqlParameter("@LateFeeMaxMultiplier", SqlDbType.Decimal) { Precision = 5, Scale = 2, Value = lateFeeMaxMultiplier },
+                new SqlParameter("@CreatedBy", SqlDbType.Int) { Value = (object?)createdBy ?? DBNull.Value },
             });
             return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters.ToArray());
         }
@@ -654,7 +657,8 @@ namespace TRL_API.DAL
                 SELECT p.Id AS PaymentId, p.RentInvoiceId AS InvoiceId, t.TenantId, t.Name AS TenantName,
                        bd.BuildingName, f.FloorNumber, u.UnitNumber, ri.ChargeType, ri.InvoiceDate, p.PaymentDate, p.PaymentAmount,
                        p.DiscountAmount, p.PaymentMethod, p.Notes, p.IsLateFeeWaived, p.CreatedAt,
-                       p.ReversalOfPaymentId, rv.Id AS ReversedByPaymentId, rv.CreatedAt AS ReversedAt, rv.Notes AS ReversalReason
+                       p.ReversalOfPaymentId, rv.Id AS ReversedByPaymentId, rv.CreatedAt AS ReversedAt, rv.Notes AS ReversalReason,
+                       " + InvoiceSql.LeaseCurrent + @" AS LeaseCurrent
                 FROM Payments p
                 LEFT JOIN Payments rv ON rv.ReversalOfPaymentId = p.Id
                 INNER JOIN RentInvoices ri ON ri.Id = p.RentInvoiceId

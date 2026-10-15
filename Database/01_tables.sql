@@ -383,7 +383,8 @@ CREATE TABLE [dbo].[RentInvoices](
 	[LateFeePerDay] [decimal](18, 2) NOT NULL,
 	[LateFeeMaxMultiplier] [decimal](5, 2) NOT NULL,
 	[RelatedInvoiceId] [int] NULL,
- CONSTRAINT [PK_RentInvoices] PRIMARY KEY CLUSTERED 
+	[CreatedBy] [int] NULL,
+ CONSTRAINT [PK_RentInvoices] PRIMARY KEY CLUSTERED
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]

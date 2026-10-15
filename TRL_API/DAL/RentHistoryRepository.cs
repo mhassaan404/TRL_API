@@ -26,6 +26,7 @@ namespace TRL_API.DAL
                        bal.LastPaymentDate,
                        COALESCE(pt.Methods, 'N/A') AS PaymentMethod,
                        COALESCE(sl.StatusName, 'Unknown') AS Status,
+                       " + InvoiceSql.LeaseCurrent + @" AS LeaseCurrent,
                        -- Any payment record that still counts (payment, discount, waiver or adjustment, not reversed):
                        -- CancelInvoice refuses these
                        CAST(CASE WHEN " + InvoiceSql.HasActivePaymentRecords + @" THEN 1 ELSE 0 END AS BIT) AS HasPaymentRecords,
@@ -69,7 +70,7 @@ namespace TRL_API.DAL
 
             var invoice = await _dbHelper.ExecuteQueryReturnDataTableAsync(@"
                 SELECT ri.Id AS InvoiceId, ri.TenantId, t.Name AS TenantName, b.BuildingName, f.FloorNumber, u.UnitNumber,
-                       ri.LeaseId, ri.InvoiceDate, ri.DueDate, ri.InvoiceMonth, ri.CreatedAt,
+                       ri.LeaseId, ri.InvoiceDate, ri.DueDate, ri.InvoiceMonth, ri.CreatedAt, cu.Username AS CreatedBy,
                        ri.TotalRent, ri.Description, ri.ChargeType, COALESCE(sl.StatusName, 'Unknown') AS Status,
                        ri.LateFeeCharged, ri.LateFeeChargedAt, ri.LateFeePerDay, ri.LateFeeMaxMultiplier,
                        bal.Paid, bal.Disc AS Discount, bal.Waived AS LateFeeWaived, bal.OpenLateFee,
@@ -85,6 +86,7 @@ namespace TRL_API.DAL
                 LEFT JOIN StatusList sl ON sl.StatusId = ri.StatusId
                 LEFT JOIN RentInvoices rel ON rel.Id = ri.RelatedInvoiceId
                 LEFT JOIN StatusList rsl ON rsl.StatusId = rel.StatusId
+                LEFT JOIN Users cu ON cu.UserId = ri.CreatedBy -- NULL for invoices made before this was recorded
                 CROSS APPLY dbo.InvoiceBalance(ri.Id, 0) bal
                 WHERE ri.Id = @InvoiceId;", new[] { id });
 

@@ -168,4 +168,29 @@ export default async ({ a }) => {
     r = await del(t2)
     ok(r.status === 400 && /not found or already deleted/.test(errorText(r)), 'deleting twice refused', r.json)
   }
+
+  // ---- tenancy 4: settled with unbilled months skipped -> those months are never billed afterwards
+  section('settled tenancy: skipped months are not billed later')
+  {
+    const t4 = await apiTenancy(a, db, { start: monthStart(TODAY, -2), rent: 30000 })
+    await a.post('/Rent/GenerateInvoices', { tenantIds: [t4.tenantId], ...parts(TODAY) }) // only this month billed
+    await a.post('/Lease/Terminate', { leaseId: t4.leaseId, reason: 'E2E move-out', moveOutDate: TODAY })
+    const pv = (await a.get(`/Settlements/Preview?tenantId=${t4.tenantId}&unitId=${t4.unitId}`)).json
+    ok((pv?.unbilled || []).length === 2, 'preview lists the 2 unbilled months', pv?.unbilled)
+    let r = await a.post('/Settlements/Finalize', {
+      tenantId: t4.tenantId, unitId: t4.unitId, leaseId: t4.leaseId, expectedOutstanding: openBalance(t4), expectedCredit: 0, expectedHeld: 0,
+      settlementDate: TODAY, acknowledgeUnbilled: true,
+    })
+    ok(r.status === 200 && r.json?.id > 0, 'settled, unbilled months skipped', r.json)
+    const invoices = () => num(db, `SELECT COUNT(*) FROM RentInvoices WHERE TenantId = ${t4.tenantId} AND StatusId <> 6`)
+    const before = invoices()
+    await a.post('/Rent/GenerateInvoices', { tenantIds: [t4.tenantId], ...parts(monthStart(TODAY, -2)) })
+    await a.post('/Rent/GenerateInvoices', { ...parts(monthStart(TODAY, -1)) }) // all tenants
+    ok(invoices() === before, 'a skipped month of a settled tenancy is not billed afterwards (selected or all tenants)', { before, after: invoices() })
+    // The same tenant renting the same unit again later is a new tenancy and is billed normally
+    r = await a.post('/Lease/Create', { tenantId: t4.tenantId, unitId: t4.unitId, rentAmount: 30000, startDate: monthStart(TODAY, 1), tenureMonths: 12 })
+    ok(r.status === 200, 'new lease for the same tenant and unit', r.json)
+    await a.post('/Rent/GenerateInvoices', { tenantIds: [t4.tenantId], ...parts(monthStart(TODAY, 1)) })
+    ok(invoices() === before + 1, 'the new tenancy is billed', { before, after: invoices() })
+  }
 }

@@ -14,8 +14,12 @@ export default async ({ a }) => {
   const settings = (await a.get('/LateFeeSettings/Get')).json
 
   section('generate rent')
-  let r = await gen(monthStart(TODAY, -2))
-  ok(r.status === 400 && /can only be generated for/.test(errorText(r)), 'months outside last / this / next month are refused', r.json)
+  let r = await gen(monthStart(TODAY, -13))
+  ok(r.status === 400 && /can only be generated for/.test(errorText(r)), 'more than 12 months back refused', r.json)
+  r = await gen(monthStart(TODAY, 2))
+  ok(r.status === 400 && /can only be generated for/.test(errorText(r)), 'more than next month ahead refused', r.json)
+  r = await gen(monthStart(TODAY, -12)) // inside the window; refused only because this lease starts later
+  ok(r.status === 400 && /No lease covers/.test(errorText(r)), '12 months back is inside the billing window', r.json)
   r = await gen(TODAY, [t.tenantId], { dueInDays: 91 })
   ok(r.status === 400 && /between 0 and 90/.test(errorText(r)), 'due days above 90 refused', r.json)
   r = await gen(TODAY, [other.tenantId])

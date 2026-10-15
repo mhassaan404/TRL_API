@@ -495,7 +495,12 @@ namespace TRL_API.DAL
                 FROM TenantLeases l
                 JOIN Tenants t ON t.TenantId = l.TenantId
                 CROSS APPLY dbo.LeaseMonthCharge(l.LeaseId, @MonthStart) c
-                WHERE t.IsDeleted = 0 AND c.Days > 0 AND c.Amount > 0;";
+                WHERE t.IsDeleted = 0 AND c.Days > 0 AND c.Amount > 0
+                  -- A settled tenancy is closed: months the settlement skipped are never billed afterwards. The settlement
+                  -- points at the tenancy's last lease, so this lease and earlier ones are covered; a later lease for the
+                  -- same tenant and unit is a new tenancy and is billed normally.
+                  AND NOT EXISTS (SELECT 1 FROM MoveOutSettlements s
+                                  WHERE s.TenantId = l.TenantId AND s.UnitId = l.UnitId AND s.LeaseId >= l.LeaseId);";
             var parameters = new[] { new SqlParameter("@Month", month), new SqlParameter("@Year", year) };
             return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters);
         }

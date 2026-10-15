@@ -46,9 +46,9 @@ namespace TRL_API.Tests
         }
 
         [Theory]
-        [InlineData(-2)]
+        [InlineData(-13)]
         [InlineData(2)]
-        public async Task Only_last_this_or_next_month_can_be_generated(int monthsAway)
+        public async Task Only_the_last_12_months_to_next_month_can_be_generated(int monthsAway)
         {
             var (svc, rent) = Rent(Charges((1, false)));
             var m = ThisMonth.AddMonths(monthsAway);

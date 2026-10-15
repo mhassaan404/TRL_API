@@ -279,15 +279,16 @@ namespace TRL_API.BLL
             if (month < 1 || month > 12 || year < 2000 || year > 2100)
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "Select a valid month and year." };
 
-            // Billing window: last month (for a run done late, early in the new month), this month and next month.
-            // Older months are never generated, so months that were never invoiced in the past can't be billed by accident.
+            // Billing window: the last 12 months (catching up leases that started before the company used the app, or a
+            // run done late), this month and next month. Older months can't be billed by accident. A past month gets its
+            // real due date, so it counts late fees only while it is unpaid (a payment recorded with its real date stops them).
             var thisMonth = new DateTime(BusinessDate.Today.Year, BusinessDate.Today.Month, 1);
             var requested = new DateTime(year, month, 1);
-            if (requested < thisMonth.AddMonths(-1) || requested > thisMonth.AddMonths(1))
+            if (requested < thisMonth.AddMonths(-12) || requested > thisMonth.AddMonths(1))
                 return new ApiResponse
                 {
                     IsSuccess = false,
-                    ErrorMessage = $"Rent can only be generated for {thisMonth.AddMonths(-1):MMMM yyyy}, {thisMonth:MMMM yyyy} or {thisMonth.AddMonths(1):MMMM yyyy}.",
+                    ErrorMessage = $"Rent can only be generated for {thisMonth.AddMonths(-12):MMMM yyyy} to {thisMonth.AddMonths(1):MMMM yyyy}.",
                 };
             if (dueInDays < 0 || dueInDays > 90)
                 return new ApiResponse { IsSuccess = false, ErrorMessage = "Due days must be between 0 and 90." };

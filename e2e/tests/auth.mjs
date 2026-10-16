@@ -132,7 +132,8 @@ export default async (ctx) => {
   section('login rate limit')
   {
     const codes = []
-    for (let i = 0; i < 21; i++) codes.push((await anon.post('/Auth/login', { clientCode: CLIENT.a })).status)
+    // Limit: 30 a minute per connection (everyone using the web app arrives through Netlify's addresses)
+    for (let i = 0; i < 41; i++) codes.push((await anon.post('/Auth/login', { clientCode: CLIENT.a })).status)
     ok(codes.includes(429), 'too many login requests from one address -> 429', codes)
   }
 }

@@ -57,7 +57,7 @@ namespace TRL_API.Controllers
             var clientCode = request.ClientCode.Trim();
 
             // Checked before the password, so a locked username can't keep guessing
-            var lockedMinutes = _throttle.LockedMinutesLeft(clientCode, request.Username, ClientIp);
+            var lockedMinutes = _throttle.LockedMinutesLeft(clientCode, request.Username, ThrottleIp);
             if (lockedMinutes != null)
             {
                 _logger.LogWarning("Login refused for {Client}/{User} from {Ip}: locked after repeated failures ({Minutes} min left).",
@@ -71,7 +71,7 @@ namespace TRL_API.Controllers
             if (client == null || !client.IsActive || client.ConnectionString == null)
             {
                 BCrypt.Net.BCrypt.Verify(request.Password, NoUserHash);
-                _throttle.RecordFailure(clientCode, request.Username, ClientIp);
+                _throttle.RecordFailure(clientCode, request.Username, ThrottleIp);
                 _logger.LogWarning("Login failed for {Client}/{User} from {Ip}: unknown or inactive client code.", clientCode, request.Username, ClientIp);
                 return Unauthorized(new ApiResponse { IsSuccess = false, ErrorMessage = InvalidLogin });
             }
@@ -80,11 +80,11 @@ namespace TRL_API.Controllers
             var user = await db.Users.FirstOrDefaultAsync(u => u.Username == request.Username);
             if (!BCrypt.Net.BCrypt.Verify(request.Password, user?.PasswordHash ?? NoUserHash) || user == null)
             {
-                _throttle.RecordFailure(clientCode, request.Username, ClientIp);
+                _throttle.RecordFailure(clientCode, request.Username, ThrottleIp);
                 _logger.LogWarning("Login failed for {Client}/{User} from {Ip}: wrong username or password.", clientCode, request.Username, ClientIp);
                 return Unauthorized(new ApiResponse { IsSuccess = false, ErrorMessage = InvalidLogin });
             }
-            _throttle.Reset(clientCode, request.Username, ClientIp);
+            _throttle.Reset(clientCode, request.Username, ThrottleIp);
 
             // Checked only after the password is verified, so it doesn't reveal which accounts exist
             if (user.IsActive != true)
@@ -201,7 +201,7 @@ namespace TRL_API.Controllers
             var userId = User.GetUserId();
             var username = User.Identity?.Name ?? "";
 
-            var lockedMinutes = _throttle.LockedMinutesLeft(client.ClientCode, username, ClientIp, PasswordScope);
+            var lockedMinutes = _throttle.LockedMinutesLeft(client.ClientCode, username, ThrottleIp, PasswordScope);
             if (lockedMinutes != null)
             {
                 _logger.LogWarning("Password change refused for {Client}/{User} from {Ip}: locked after wrong current passwords.", client.ClientCode, username, ClientIp);
@@ -221,11 +221,11 @@ namespace TRL_API.Controllers
             // 400, not 401: a wrong current password is not an expired session (the frontend would log the user out)
             if (!BCrypt.Net.BCrypt.Verify(request!.CurrentPassword, user.PasswordHash))
             {
-                _throttle.RecordFailure(client.ClientCode, username, ClientIp, PasswordScope);
+                _throttle.RecordFailure(client.ClientCode, username, ThrottleIp, PasswordScope);
                 _logger.LogWarning("Password change failed for {Client}/{User} from {Ip}: wrong current password.", client.ClientCode, username, ClientIp);
                 return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "Your current password is incorrect." });
             }
-            _throttle.Reset(client.ClientCode, username, ClientIp, PasswordScope);
+            _throttle.Reset(client.ClientCode, username, ThrottleIp, PasswordScope);
 
             if (BCrypt.Net.BCrypt.Verify(request.NewPassword, user.PasswordHash))
                 return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "The new password must be different from your current password." });
@@ -271,7 +271,23 @@ namespace TRL_API.Controllers
             Expires = expires
         };
 
-        private string ClientIp => HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        // Address used for the login lockout: the real connection, which a caller can't fake. Behind the Netlify
+        // forwarding (the app calls /api on its own site) that is Netlify's address, so the lockout stays per
+        // username for everyone coming through the site.
+        private string ThrottleIp => HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+        // Address written to the logs: the connection, plus the user's address that a proxy forwarded (for
+        // information only: it is a header anyone could set, so it is never used for security decisions).
+        private string ClientIp
+        {
+            get
+            {
+                var forwarded = Request.Headers["X-Forwarded-For"].ToString().Split(',')[0].Trim();
+                if (string.IsNullOrEmpty(forwarded)) forwarded = Request.Headers["X-Nf-Client-Connection-Ip"].ToString().Trim();
+                if (forwarded.Length > 64) forwarded = forwarded[..64];
+                return string.IsNullOrEmpty(forwarded) ? ThrottleIp : $"{ThrottleIp} (forwarded for {forwarded})";
+            }
+        }
 
         // Refresh cookie = "<clientId>.<token>". The client id only says where to look; the token proves the session.
         private static string RefreshCookieValue(int clientId, string token) => $"{clientId}.{token}";

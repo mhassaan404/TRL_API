@@ -156,15 +156,17 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddScoped<DbHelper>();
 
-// Login protection: per-username lockout after repeated failures (LoginThrottle) plus a per-IP limit on /Auth/login.
-// Behind a reverse proxy, configure forwarded headers so RemoteIpAddress is the client, not the proxy.
+// Login protection: per-username lockout after repeated failures (LoginThrottle) plus a per-connection limit on
+// /Auth/login. Users of the web app come through the Netlify forwarding (/api on the app's own site), so they share
+// Netlify's addresses: the limit (30 a minute) leaves room for everyone, and the lockout stays per username.
+// Forwarded-for headers are not trusted for this (anyone can set them).
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<LoginThrottle>();
 builder.Services.AddRateLimiter(options =>
 {
     options.AddPolicy("login", context => RateLimitPartition.GetFixedWindowLimiter(
         context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-        _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.OnRejected = async (context, token) =>
     {
         const string message = "Too many login attempts from this address. Wait a minute and try again.";

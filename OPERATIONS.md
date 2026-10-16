@@ -19,7 +19,10 @@ Set on the host, never in `appsettings.json` or the repository. Names only; valu
 | `AllowedHosts` | The API host name (`appsettings.json` has `localhost`, which would refuse every other host) |
 | `FileLogging__Path`, `FileLogging__KeepDays` | Optional: log folder (default `logs`) and days kept (default 30); `Path` empty = off |
 
-The frontend needs `VITE_API_BASE_URL` (e.g. `https://rent-trlapi.runasp.net/api`) **at build time**.
+The frontend calls `/api` on its own site; Netlify forwards it to the API (`public/_redirects` in the TRL repo). Build
+it **without** `VITE_API_BASE_URL`. Pointing a production build straight at the API's address makes the login cookie
+third-party, and browsers that block those (Safari, incognito) then show "Session expired" right after login. If the
+API address ever changes (e.g. Azure), change it in `public/_redirects`.
 
 ## 2. Deployment order
 
@@ -27,7 +30,7 @@ The frontend needs `VITE_API_BASE_URL` (e.g. `https://rent-trlapi.runasp.net/api
 2. Migrations: WebMSSQL versions in `D:\TRL\prod_import` (WebMSSQL runs each statement on its own, so multi-statement
    migrations are packaged as one compound statement there), one at a time, checking each result row.
 3. API: Visual Studio → TRL_API → Publish → profile `site95547-WebDeploy`.
-4. Frontend (only when it changed): build with `VITE_API_BASE_URL` and upload the `build` folder to Netlify.
+4. Frontend (only when it changed): `npm run build` (no `VITE_API_BASE_URL`) and upload the `build` folder to Netlify.
 5. `powershell -ExecutionPolicy Bypass -File D:\TRL\deploy_ready\post_deploy_check.ps1` → `ALL CHECKS PASSED`.
 
 **Phase 6 release** (packages in `D:\TRL\deploy_ready\phase6`, step by step in `DEPLOY_PHASE6.txt`):

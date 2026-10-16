@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -175,21 +176,48 @@ builder.Services.AddRateLimiter(options =>
     };
 });
 
+// Compression for the website files (used only outside /api, see below)
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[] { "text/javascript", "image/svg+xml" });
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(o => o.Level = System.IO.Compression.CompressionLevel.Optimal);
+builder.Services.Configure<GzipCompressionProviderOptions>(o => o.Level = System.IO.Compression.CompressionLevel.Optimal);
+
 var app = builder.Build();
 
-// Security headers on every response (also errors): no MIME sniffing, never shown in a frame, no referrer, and API
-// data (rent, payments, tenant details) is never stored by browsers or proxies. Swagger (Development only) keeps
-// its own caching and scripts. HSTS (HTTPS only, not for localhost) outside Development.
+// Security headers on every response (also errors): no MIME sniffing and never shown in a frame.
+//  - API (/api, and any address that isn't a website file): no referrer, nothing may load from it, and the data
+//    (rent, payments, tenant details) is never stored by browsers or proxies.
+//  - Website files (wwwroot: the React app, served from this same site so the login cookie is first-party): the app's
+//    own policy; the hashed files in /assets are kept by browsers for good (a new build gives them new names),
+//    everything else (index.html) is re-checked so a new deploy shows up at once.
+// Swagger (Development only) keeps its own caching and scripts. HSTS (HTTPS only, not for localhost) outside Development.
 app.Use(async (context, next) =>
 {
     context.Response.OnStarting(() =>
     {
         var headers = context.Response.Headers;
+        var path = context.Request.Path;
         headers["X-Content-Type-Options"] = "nosniff";
         headers["X-Frame-Options"] = "DENY";
-        headers["Referrer-Policy"] = "no-referrer";
-        if (!context.Request.Path.StartsWithSegments("/swagger"))
+        if (path.StartsWithSegments("/swagger"))
         {
+            headers["Referrer-Policy"] = "no-referrer";
+        }
+        else if (!path.StartsWithSegments("/api")) // every API endpoint is under /api; the rest is the website
+        {
+            headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+            headers["Content-Security-Policy"] = "frame-ancestors 'none'; object-src 'none'; base-uri 'self'";
+            headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=(), usb=()";
+            headers.CacheControl = path.StartsWithSegments("/assets") ? "public, max-age=31536000, immutable" : "no-cache";
+        }
+        else
+        {
+            headers["Referrer-Policy"] = "no-referrer";
             headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'";
             headers.CacheControl = "no-store";
         }
@@ -240,6 +268,16 @@ if (app.Environment.IsDevelopment())
 
 // Middleware order is important
 app.UseHttpsRedirection();
+
+// The website: the React app's build in wwwroot (npm run build:server in the TRL repo), served from this site so the
+// app and the API share one address (first-party login cookie, no separate host). Compressed (gzip/brotli) for slow
+// connections. Only outside /api, so API responses are never compressed or mixed up with files.
+app.UseWhen(c => !c.Request.Path.StartsWithSegments("/api"), web =>
+{
+    web.UseResponseCompression();
+    web.UseDefaultFiles(); // "/" -> index.html
+    web.UseStaticFiles();
+});
 
 app.UseCors("AllowFrontend");
 

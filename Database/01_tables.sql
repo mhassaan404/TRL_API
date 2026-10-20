@@ -121,7 +121,8 @@ CREATE TABLE [dbo].[InvoiceAudit](
 	[Reason] [nvarchar](300) NULL,
 	[CreatedBy] [int] NULL,
 	[CreatedAt] [datetime] NOT NULL,
- CONSTRAINT [PK_InvoiceAudit] PRIMARY KEY CLUSTERED 
+	[OldAmount] [decimal](18, 2) NULL,
+ CONSTRAINT [PK_InvoiceAudit] PRIMARY KEY CLUSTERED
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]

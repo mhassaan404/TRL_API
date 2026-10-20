@@ -72,6 +72,10 @@ the next release (setting `SchemaVersion.Required` to it and regenerating `01`/`
 **Constraint names** are fixed (`PK_<Table>`, `UQ_<Table>_<Column>`, `DF_<Table>_<Column>`, `FK_<Table>_<Column>`,
 `CK_...`) since `2026-10-13_cleanup`, so later scripts can refer to them by name. Always name new constraints.
 
+**Rent changed after billing** (lease ended early, cancelled, renewal cancelled) is recorded in `InvoiceAudit` as
+`RENT_ADJUSTED` with the new amount (`Amount`) and, since `2026-10-20_invoice_audit_old_amount`, the amount before
+(`OldAmount`). The Tenant Statement shows the invoice at its billed amount and each change as its own dated line.
+
 **A tenant's unit and rent** come from their lease: `dbo.TenantCurrentLease(@TenantId)` (the most recently made active
 lease; for a moved-out tenant, their last lease that wasn't a cancelled renewal). The old copy in `Tenants` is no longer
 read or written.

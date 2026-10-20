@@ -122,11 +122,11 @@ namespace TRL_API.DAL
         //   - otherwise re-priced; discounts are capped to what is still owed after the cash, so only real cash can
         //     ever become a credit (overpaid). Payment rows are never deleted.
         private const string AdjustInvoicesAfterEndSql = @"
-                DECLARE @Adj TABLE (InvoiceId INT PRIMARY KEY, NewAmount DECIMAL(18,2), Descr NVARCHAR(200), Cash DECIMAL(18,2), Fee DECIMAL(18,2));
+                DECLARE @Adj TABLE (InvoiceId INT PRIMARY KEY, NewAmount DECIMAL(18,2), Descr NVARCHAR(200), Cash DECIMAL(18,2), Fee DECIMAL(18,2), OldAmount DECIMAL(18,2));
                 INSERT INTO @Adj
                 SELECT ri.Id, c.Amount, c.Descr,
                        (SELECT ISNULL(SUM(p.PaymentAmount), 0) FROM Payments p WHERE p.RentInvoiceId = ri.Id),
-                       ri.LateFeeCharged
+                       ri.LateFeeCharged, ri.TotalRent
                 FROM RentInvoices ri
                 JOIN @Affected a ON a.LeaseId = ri.LeaseId
                 JOIN TenantLeases l ON l.LeaseId = ri.LeaseId
@@ -173,8 +173,9 @@ namespace TRL_API.DAL
                 UPDATE ri SET TotalRent = x.NewAmount, Description = x.Descr
                 FROM RentInvoices ri JOIN @Adj x ON x.InvoiceId = ri.Id;
 
-                INSERT INTO InvoiceAudit (InvoiceId, Action, Amount, Reason, CreatedBy)
-                SELECT InvoiceId, 'RENT_ADJUSTED', NewAmount, @AdjReason, @UserId FROM @Adj;
+                -- OldAmount: what the invoice was billed for before this change (the Tenant Statement shows the change as its own line)
+                INSERT INTO InvoiceAudit (InvoiceId, Action, Amount, Reason, CreatedBy, OldAmount)
+                SELECT InvoiceId, 'RENT_ADJUSTED', NewAmount, @AdjReason, @UserId, OldAmount FROM @Adj;
 
                 -- Recalculate pending/overpaid/status (InvoiceSql.Recalc) for the corrected invoices
                 " + InvoiceSql.Recalc + @"
@@ -296,9 +297,9 @@ namespace TRL_API.DAL
 
                 -- The restored lease covers its months in full again: re-price invoices the renewal had shortened
                 -- (the change-over month). The amounts only go up, so no discount needs reducing.
-                DECLARE @Up TABLE (InvoiceId INT PRIMARY KEY, NewAmount DECIMAL(18,2), Descr NVARCHAR(200));
+                DECLARE @Up TABLE (InvoiceId INT PRIMARY KEY, NewAmount DECIMAL(18,2), Descr NVARCHAR(200), OldAmount DECIMAL(18,2));
                 INSERT INTO @Up
-                SELECT ri.Id, c.Amount, c.Descr
+                SELECT ri.Id, c.Amount, c.Descr, ri.TotalRent
                 FROM RentInvoices ri
                 CROSS APPLY dbo.LeaseMonthCharge(ri.LeaseId, ri.InvoiceMonth) c
                 WHERE ri.LeaseId = @PrevId AND ri.ChargeType IS NULL AND ri.StatusId <> 6 AND c.Amount <> ri.TotalRent;
@@ -306,8 +307,8 @@ namespace TRL_API.DAL
                 UPDATE ri SET TotalRent = u.NewAmount, Description = u.Descr
                 FROM RentInvoices ri JOIN @Up u ON u.InvoiceId = ri.Id;
 
-                INSERT INTO InvoiceAudit (InvoiceId, Action, Amount, Reason, CreatedBy)
-                SELECT InvoiceId, 'RENT_ADJUSTED', NewAmount, @AdjReason, @UserId FROM @Up;
+                INSERT INTO InvoiceAudit (InvoiceId, Action, Amount, Reason, CreatedBy, OldAmount)
+                SELECT InvoiceId, 'RENT_ADJUSTED', NewAmount, @AdjReason, @UserId, OldAmount FROM @Up;
 
                 " + InvoiceSql.Recalc + @"
                 JOIN @Up u ON u.InvoiceId = ri.Id;

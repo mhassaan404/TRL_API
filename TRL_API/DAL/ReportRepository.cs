@@ -102,6 +102,10 @@ namespace TRL_API.DAL
         // Every account entry of the tenant up to @To (the service splits it into opening balance and period lines).
         // Charges: invoices (by invoice date) and charged late fees (by charge date).
         // Credits: payments and the discounts given with them (by payment date).
+        // Rent changed later (lease ended early, cancelled, renewal cancelled: InvoiceAudit RENT_ADJUSTED with OldAmount):
+        // the invoice shows the amount it was billed for on its date, and each change is its own line on the day it
+        // happened, so every running balance is what it really was then. An invoice with a change whose old amount
+        // isn't known (older records, see migration 2026-10-20) shows its current amount and no change lines, as before.
         // Cancelled invoices (StatusId 6) and anything paid against them are left out, like everywhere else,
         // so the balance equals the sum of dbo.InvoiceBalance over the tenant's invoices (minus unlinked payments).
         public async Task<DataTable> GetStatementEntriesAsync(int tenantId, DateTime to) =>
@@ -110,16 +114,42 @@ namespace TRL_API.DAL
                     SELECT ISNULL(ri.InvoiceDate, CAST(ri.CreatedAt AS DATE)) AS EntryDate, 1 AS SortOrder, N'Invoice' AS EntryType,
                            ri.Id AS InvoiceId, CAST(NULL AS INT) AS PaymentId,
                            CASE WHEN ri.ChargeType IS NOT NULL THEN CONCAT(ri.ChargeType, N' – ' + NULLIF(ri.Description, N''))
-                                ELSE CONCAT(N'Rent ', FORMAT(ri.InvoiceMonth, 'MMM yyyy', 'en-US'), N' – ' + NULLIF(ri.Description, N'')) END AS Description,
+                                -- billed as a whole month and changed later: the current part-month note belongs to the change
+                                WHEN adj.Known = 1 THEN CONCAT(N'Rent ', FORMAT(ri.InvoiceMonth, 'MMM yyyy', 'en-US'))
+                                -- the stored note starts with ""Rent "" itself: drop it so the line doesn't read ""Rent ... – Rent ...""
+                                ELSE CONCAT(N'Rent ', FORMAT(ri.InvoiceMonth, 'MMM yyyy', 'en-US'),
+                                            N' – ' + NULLIF(CASE WHEN ri.Description LIKE N'Rent %' THEN STUFF(ri.Description, 1, 5, N'') ELSE ri.Description END, N''))
+                           END AS Description,
                            ri.UnitId, CAST(NULL AS NVARCHAR(150)) AS Method, ri.DueDate,
-                           ri.TotalRent AS Charge, CAST(0 AS DECIMAL(18, 2)) AS Credit
+                           CASE WHEN adj.Known = 1 THEN adj.FirstOld ELSE ri.TotalRent END AS Charge, CAST(0 AS DECIMAL(18, 2)) AS Credit,
+                           CAST(ri.CreatedAt AS DATETIME) AS At
                     FROM RentInvoices ri
+                    OUTER APPLY (SELECT CASE WHEN COUNT(*) > 0 AND COUNT(*) = COUNT(a.OldAmount) THEN 1 ELSE 0 END AS Known,
+                                        (SELECT TOP (1) f.OldAmount FROM InvoiceAudit f
+                                         WHERE f.InvoiceId = ri.Id AND f.Action = 'RENT_ADJUSTED' ORDER BY f.Id) AS FirstOld
+                                 FROM InvoiceAudit a WHERE a.InvoiceId = ri.Id AND a.Action = 'RENT_ADJUSTED') adj
                     WHERE ri.TenantId = @TenantId AND ri.StatusId <> 6
+
+                    UNION ALL
+                    SELECT CAST(a.CreatedAt AS DATE), 5, N'Adjustment',
+                           ri.Id, NULL,
+                           CONCAT(CASE WHEN a.Amount < a.OldAmount THEN N'Rent reduced' ELSE N'Rent increased' END,
+                                  N' on invoice #', ri.Id, N' to ', FORMAT(a.Amount, 'N0', 'en-US'),
+                                  N' – ' + NULLIF(a.Reason, N'')),
+                           ri.UnitId, NULL, NULL,
+                           CASE WHEN a.Amount > a.OldAmount THEN a.Amount - a.OldAmount ELSE 0 END,
+                           CASE WHEN a.Amount < a.OldAmount THEN a.OldAmount - a.Amount ELSE 0 END,
+                           a.CreatedAt
+                    FROM InvoiceAudit a
+                    JOIN RentInvoices ri ON ri.Id = a.InvoiceId
+                    WHERE ri.TenantId = @TenantId AND ri.StatusId <> 6 AND a.Action = 'RENT_ADJUSTED' AND a.Amount <> a.OldAmount
+                      AND NOT EXISTS (SELECT 1 FROM InvoiceAudit n
+                                      WHERE n.InvoiceId = ri.Id AND n.Action = 'RENT_ADJUSTED' AND n.OldAmount IS NULL)
 
                     UNION ALL
                     SELECT CAST(ISNULL(ri.LateFeeChargedAt, ri.DueDate) AS DATE), 2, N'Late Fee',
                            ri.Id, NULL, CONCAT(N'Late fee on invoice #', ri.Id), ri.UnitId, NULL, NULL,
-                           ri.LateFeeCharged, 0
+                           ri.LateFeeCharged, 0, ISNULL(ri.LateFeeChargedAt, ri.CreatedAt)
                     FROM RentInvoices ri
                     WHERE ri.TenantId = @TenantId AND ri.StatusId <> 6 AND ri.LateFeeCharged > 0
 
@@ -131,7 +161,7 @@ namespace TRL_API.DAL
                                 WHEN p.RentInvoiceId IS NULL THEN N'Payment' ELSE CONCAT(N'Payment for invoice #', p.RentInvoiceId) END
                              + CASE WHEN p.IsLateFeeWaived = 1 THEN N' (late fee waived)' ELSE N'' END,
                            ri.UnitId, ISNULL(NULLIF(LTRIM(RTRIM(p.PaymentMethod)), ''), 'Unknown'), NULL,
-                           0, p.PaymentAmount
+                           0, p.PaymentAmount, ISNULL(p.CreatedAt, p.PaymentDate)
                     FROM Payments p
                     LEFT JOIN RentInvoices ri ON ri.Id = p.RentInvoiceId
                     WHERE p.TenantId = @TenantId AND ISNULL(ri.StatusId, 0) <> 6 AND p.PaymentAmount <> 0
@@ -143,7 +173,7 @@ namespace TRL_API.DAL
                                 THEN CONCAT(N'Reversal of discount (payment #', p.ReversalOfPaymentId, N', invoice #', p.RentInvoiceId, N')')
                                 WHEN p.RentInvoiceId IS NULL THEN N'Discount' ELSE CONCAT(N'Discount on invoice #', p.RentInvoiceId) END,
                            ri.UnitId, NULL, NULL,
-                           0, p.DiscountAmount
+                           0, p.DiscountAmount, ISNULL(p.CreatedAt, p.PaymentDate)
                     FROM Payments p
                     LEFT JOIN RentInvoices ri ON ri.Id = p.RentInvoiceId
                     WHERE p.TenantId = @TenantId AND ISNULL(ri.StatusId, 0) <> 6 AND p.DiscountAmount <> 0
@@ -154,7 +184,9 @@ namespace TRL_API.DAL
                              LEFT JOIN Buildings bd ON bd.BuildingId = f.BuildingId
                              WHERE u.UnitId = e.UnitId) un
                 WHERE e.EntryDate <= @To
-                ORDER BY e.EntryDate, e.SortOrder, e.InvoiceId, e.PaymentId;",
+                -- Within a day: in the order things happened (At = when it was entered), so the running balance follows the
+                -- real sequence (e.g. a rent change before that day's payments)
+                ORDER BY e.EntryDate, e.At, e.SortOrder, e.InvoiceId, e.PaymentId;",
                 new[] { new SqlParameter("@TenantId", tenantId), new SqlParameter("@To", SqlDbType.Date) { Value = to } });
 
         // Billing vs Collection: one row per month from @From to @To (first days of months), even months with nothing.

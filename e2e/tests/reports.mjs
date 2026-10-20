@@ -106,6 +106,34 @@ export default async ({ a }) => {
     ok(dash.length === 7 && thisMonth && Number(thisMonth.totalRentDue) === due && Number(thisMonth.collectedAmount) === paid, `dashboard this month: due ${due}, collected ${paid}`, thisMonth)
   }
 
+  section('Tenant Statement: a rent change at lease end is its own dated line')
+  {
+    const rent = 31000
+    const tl = await apiTenancy(a, db, { start: monthStart(TODAY, -1), rent })
+    await a.post('/Rent/GenerateInvoices', { tenantIds: [tl.tenantId], ...parts(TODAY) }) // whole month billed
+    const inv = num(db, `SELECT MAX(Id) FROM RentInvoices WHERE LeaseId = ${tl.leaseId} AND InvoiceMonth = '${monthStart(TODAY)}'`)
+    ok(num(db, `SELECT TotalRent FROM RentInvoices WHERE Id = ${inv}`) === rent, 'this month billed in full')
+    let r = await a.post('/Lease/Terminate', { leaseId: tl.leaseId, reason: 'E2E early move-out', moveOutDate: monthStart(TODAY) })
+    const now = num(db, `SELECT TotalRent FROM RentInvoices WHERE Id = ${inv}`)
+    ok(r.status === 200 && now < rent, `ended on the 1st: invoice re-priced to one day (${now})`, r.json)
+    ok(sql(db, `SELECT OldAmount, Amount FROM InvoiceAudit WHERE InvoiceId = ${inv} AND Action = 'RENT_ADJUSTED'`)[0]?.map(Number).join('|') === `${rent}|${now}`,
+       'the change records the old and the new amount')
+    const st = (await a.get(`/Reports/TenantStatement?tenantId=${tl.tenantId}&from=2000-01-01&to=${TODAY}`)).json
+    const lines = st?.lines || []
+    const invLine = lines.find((l) => l.type === 'Invoice' && l.invoiceId === inv)
+    const adjLine = lines.find((l) => l.type === 'Adjustment' && l.invoiceId === inv)
+    ok(invLine && Number(invLine.charge) === rent && !/Rent .* – Rent /.test(invLine.description),
+       'invoice shown at the amount billed on its date (no repeated "Rent")', invLine)
+    ok(adjLine && Number(adjLine.credit) === round2(rent - now) && Number(adjLine.charge) === 0 && /Rent reduced/.test(adjLine.description),
+       `the reduction is its own line (${round2(rent - now)} credit)`, adjLine)
+    const owed = num(db, `SELECT ISNULL(SUM(b.Balance), 0) FROM RentInvoices ri CROSS APPLY dbo.InvoiceBalance(ri.Id, 0) b WHERE ri.TenantId = ${tl.tenantId} AND ri.StatusId <> 6`)
+    ok(Number(st?.closingBalance) === owed, `closing balance still = what is owed (${owed})`, st?.closingBalance)
+    // Up to the day before the change, the balance is the full month (what it really was then)
+    const before = (await a.get(`/Reports/TenantStatement?tenantId=${tl.tenantId}&from=2000-01-01&to=${monthStart(TODAY)}`)).json
+    const beforeInv = (before?.lines || []).find((l) => l.type === 'Invoice' && l.invoiceId === inv)
+    ok(beforeInv && Number(beforeInv.balance) >= rent, 'running balance right after the invoice includes the full month', beforeInv)
+  }
+
   section('payment without an invoice: building comes from the tenant\'s lease')
   {
     const building = num(db, `SELECT f.BuildingId FROM Units u JOIN Floors f ON f.FloorId = u.FloorId WHERE u.UnitId = ${t.unitId}`)

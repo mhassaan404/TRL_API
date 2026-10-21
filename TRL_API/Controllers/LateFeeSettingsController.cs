@@ -6,7 +6,7 @@ using TRL_API.Models;
 
 namespace TRL_API.Controllers
 {
-    [Authorize(Roles = "Admin")]
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class LateFeeSettingsController : ControllerBase
@@ -15,9 +15,11 @@ namespace TRL_API.Controllers
         public LateFeeSettingsController(ILateFeeSettingsService service) => _service = service;
 
         [HttpGet("Get")]
+        [RequirePermission("lateFeeSettings:view")]
         public async Task<IActionResult> Get() => Ok(await _service.GetAsync());
 
         [HttpPost("Save")]
+        [RequirePermission("lateFeeSettings:edit")]
         public async Task<IActionResult> Save(SaveLateFeeSettingsRequest req)
         {
             var response = await _service.SaveAsync(req, User.GetUserId());

@@ -7,7 +7,7 @@ using TRL_API.Models;
 
 namespace TRL_API.Controllers
 {
-    [Authorize(Roles = "Admin")]
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class RentHistoryController : ControllerBase
@@ -21,6 +21,7 @@ namespace TRL_API.Controllers
 
         // GetHistory
         [HttpGet("History")]
+        [RequirePermission("rentHistory:view")]
         public async Task<IActionResult> GetHistoryAsync()
         {
             var data = await _service.GetHistoryAsync();
@@ -30,6 +31,7 @@ namespace TRL_API.Controllers
 
         // One invoice with its payments and recorded events (History window on Rent History). Read only.
         [HttpGet("InvoiceDetails")]
+        [RequirePermission("rentHistory:view")]
         public async Task<IActionResult> GetInvoiceDetails([FromQuery] int invoiceId)
         {
             if (invoiceId <= 0)
@@ -48,9 +50,10 @@ namespace TRL_API.Controllers
             });
         }
 
-        [Authorize(Roles = "Admin")]
         // The reason travels in the body (not the URL), so it doesn't end up in server or proxy logs
         [HttpPatch("CancelInvoice")]
+        [RequirePermission("rentHistory:edit")]
+        [RequirePermission("action:deleteCancel")]
         public async Task<IActionResult> CancelInvoice([FromBody] CancelInvoiceRequest req)
         {
             if (req == null || req.InvoiceId <= 0) return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "Invoice is required." });
@@ -60,8 +63,9 @@ namespace TRL_API.Controllers
 
         public class CancelInvoiceRequest { public int InvoiceId { get; set; } public string? Reason { get; set; } }
 
-        [Authorize(Roles = "Admin")]
         [HttpPatch("ReinstateInvoice")]
+        [RequirePermission("rentHistory:edit")]
+        [RequirePermission("action:deleteCancel")]
         public async Task<IActionResult> ReinstateInvoice([FromBody] int id)
         {
             if (id <= 0)

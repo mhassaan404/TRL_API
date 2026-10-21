@@ -29,7 +29,8 @@ Run from the `TRL_API` repository folder. Exit code 0 = everything passed.
 | `payments` | recording rules (balance, tenant, duplicate, all-or-nothing), discounts, waivers, adjustments, payment reversal (rules, concurrency, receipts, reports, original rows unchanged), client isolation |
 | `deposits-settlement` | agreed / received / corrections / receipts, move-out settlement (dues, deductions, final payment, refunds, protections) |
 | `reports` | Arrears Ageing, Rent Collection, Reminders, Collections, Tenant Statement, Billing vs Collection, Rent Roll and Dashboard cross-checked against the database |
-| `auth` | login errors, deactivated / non-Admin users, cookies, refresh rotation, tampering, CSRF, logout, change password, client isolation, login rate limit (runs last) |
+| `permissions` | staff users: creating them (Super Admin only), page view/edit and risky-action permissions checked on every request, changes applying at once, password reset and switching off signing the user out |
+| `auth` | login errors, deactivated users / unknown roles, cookies, refresh rotation, tampering, CSRF, logout, change password, client isolation, login rate limit (runs last) |
 
 Results: `ok` = passed, `FAIL` = failed (exit code 1), `KNOWN` = a confirmed gap in the application that is reported
 in the summary but doesn't fail the run. When one is fixed the test prints `fixed …`; then turn it into a normal check.

@@ -9,7 +9,7 @@ namespace TRL_API.Tests
 {
     public class SecurityTests
     {
-        // Only these may be called without an Admin login; everything else must require Role = Admin
+        // Only these may be called without a login; everything else needs a login AND a permission check
         private static readonly string[] Anonymous = { "AuthController.Login", "AuthController.Refresh", "AuthController.Logout" };
 
         private static IEnumerable<(Type Controller, MethodInfo Action)> Actions() =>
@@ -19,17 +19,89 @@ namespace TRL_API.Tests
                     .Where(m => m.GetCustomAttributes<Microsoft.AspNetCore.Mvc.Routing.HttpMethodAttribute>().Any())
                     .Select(m => (t, m)));
 
-        private static bool RequiresAdmin(Type controller, MethodInfo action) =>
-            controller.GetCustomAttributes<AuthorizeAttribute>().Concat(action.GetCustomAttributes<AuthorizeAttribute>())
-                .Any(a => (a.Roles ?? "").Split(',').Select(r => r.Trim()).SequenceEqual(new[] { "Admin" }));
+        private static IEnumerable<T> Both<T>(Type controller, MethodInfo action) where T : Attribute =>
+            controller.GetCustomAttributes<T>().Concat(action.GetCustomAttributes<T>());
+
+        // Signed in ([Authorize]) and checked against the user's current access by one of the permission attributes
+        private static bool Protected(Type controller, MethodInfo action) =>
+            Both<AuthorizeAttribute>(controller, action).Any()
+            && (Both<RequirePermissionAttribute>(controller, action).Any() || Both<SignedInUserAttribute>(controller, action).Any()
+                || Both<SuperAdminOnlyAttribute>(controller, action).Any());
 
         [Fact]
-        public void Every_endpoint_requires_Admin_except_login_refresh_logout()
+        public void Every_endpoint_needs_a_login_and_a_permission_check_except_login_refresh_logout()
         {
             var actions = Actions().ToList();
             Assert.True(actions.Count > 80, $"only {actions.Count} actions found");
-            var open = actions.Where(x => !RequiresAdmin(x.Controller, x.Action)).Select(x => $"{x.Controller.Name}.{x.Action.Name}").OrderBy(n => n).ToList();
+            var open = actions.Where(x => !Protected(x.Controller, x.Action)).Select(x => $"{x.Controller.Name}.{x.Action.Name}").OrderBy(n => n).ToList();
             Assert.Equal(Anonymous.OrderBy(n => n), open);
+        }
+
+        [Fact]
+        public void Every_required_permission_is_a_known_one()
+        {
+            var unknown = Actions().SelectMany(x => Both<RequirePermissionAttribute>(x.Controller, x.Action)
+                    .SelectMany(a => a.AnyOf.Select(p => (Name: $"{x.Controller.Name}.{x.Action.Name}", p))))
+                .Where(x => !Permissions.All.Contains(x.p)).Select(x => $"{x.Name}: {x.p}");
+            Assert.Empty(unknown);
+            Assert.All(Actions().SelectMany(x => Both<RequirePermissionAttribute>(x.Controller, x.Action)), a => Assert.NotEmpty(a.AnyOf));
+        }
+
+        [Fact]
+        public void Changing_data_needs_an_edit_permission_or_super_admin()
+        {
+            // Every POST/PUT/PATCH/DELETE (except auth and the user's own password) needs some "<page>:edit" or the Super Admin
+            var weak = Actions()
+                .Where(x => x.Controller != typeof(TRL_API.Controllers.AuthController))
+                .Where(x => x.Action.GetCustomAttributes<Microsoft.AspNetCore.Mvc.Routing.HttpMethodAttribute>().Any(h => !h.HttpMethods.Contains("GET")))
+                .Where(x => !Both<SuperAdminOnlyAttribute>(x.Controller, x.Action).Any()
+                            && !Both<RequirePermissionAttribute>(x.Controller, x.Action).Any(a => a.AnyOf.All(p => p.EndsWith(":edit"))))
+                .Select(x => $"{x.Controller.Name}.{x.Action.Name}");
+            Assert.Empty(weak);
+        }
+
+        [Fact]
+        public void Risky_actions_need_their_own_permission()
+        {
+            static string[] Needs(Type c, string action) =>
+                c.GetMethod(action)!.GetCustomAttributes<RequirePermissionAttribute>().SelectMany(a => a.AnyOf).ToArray();
+            Assert.Contains(Permissions.ReversePayment, Needs(typeof(TRL_API.Controllers.RentController), "ReversePayment"));
+            Assert.Contains(Permissions.LateFee, Needs(typeof(TRL_API.Controllers.RentController), "ChargeLateFee"));
+            Assert.Contains(Permissions.LateFee, Needs(typeof(TRL_API.Controllers.RentController), "ReverseLateFee"));
+            Assert.Contains(Permissions.EndLease, Needs(typeof(TRL_API.Controllers.LeaseController), "Terminate"));
+            foreach (var (c, a) in new[] {
+                (typeof(TRL_API.Controllers.LeaseController), "Cancel"), (typeof(TRL_API.Controllers.LeaseController), "CancelRenewal"),
+                (typeof(TRL_API.Controllers.RentHistoryController), "CancelInvoice"), (typeof(TRL_API.Controllers.RentHistoryController), "ReinstateInvoice"),
+                (typeof(TRL_API.Controllers.TenantController), "DeleteTenant"), (typeof(TRL_API.Controllers.PropertiesController), "DeleteBuilding"),
+                (typeof(TRL_API.Controllers.PropertiesController), "DeleteFloor"), (typeof(TRL_API.Controllers.PropertiesController), "DeleteUnit") })
+                Assert.Contains(Permissions.DeleteCancel, Needs(c, a));
+            // Every action permission is used somewhere (discount is checked inside SubmitPayments)
+            var used = Actions().SelectMany(x => Both<RequirePermissionAttribute>(x.Controller, x.Action).SelectMany(a => a.AnyOf)).ToHashSet();
+            Assert.All(Permissions.Actions.Where(p => p != Permissions.Discount), p => Assert.Contains(p, used));
+        }
+
+        [Fact]
+        public void Users_page_is_super_admin_only()
+        {
+            Assert.NotNull(typeof(TRL_API.Controllers.UsersController).GetCustomAttribute<SuperAdminOnlyAttribute>());
+        }
+
+        [Fact]
+        public void Permissions_are_normalized_and_edit_includes_view()
+        {
+            var stored = Permissions.Normalize(new[] { "tenants:view", "tenants:edit", "payments:view", "payments:edit", "bogus", "action:discount", "dashboard:view", null! });
+            // unknown and impossible ones dropped (payments has no edit level), edit kept instead of view
+            Assert.Equal(new[] { "action:discount", "dashboard:view", "payments:view", "tenants:edit" }, stored);
+            var granted = stored.ToHashSet();
+            Assert.True(Permissions.Grants(granted, "tenants:view"));
+            Assert.True(Permissions.Grants(granted, "tenants:edit"));
+            Assert.False(Permissions.Grants(granted, "payments:edit"));
+            Assert.False(Permissions.Grants(granted, "leases:view"));
+            Assert.False(Permissions.Grants(granted, "action:reversePayment"));
+            Assert.True(new AccessInfo(1, "x", null, true, new HashSet<string>()).Can("action:reversePayment"));
+            Assert.False(new AccessInfo(1, "x", null, false, new HashSet<string>()).Can("dashboard:view"));
+            Assert.True(Permissions.CanLogIn("Admin") && Permissions.CanLogIn("User"));
+            Assert.False(Permissions.CanLogIn("Tenant") || Permissions.CanLogIn(null) || Permissions.CanLogIn("admin"));
         }
 
         [Fact]

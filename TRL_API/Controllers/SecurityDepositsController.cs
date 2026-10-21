@@ -7,7 +7,7 @@ using TRL_API.Models;
 namespace TRL_API.Controllers
 {
     // Security deposits (Rent > Security Deposits): money held for a tenancy, kept apart from rent.
-    [Authorize(Roles = "Admin")]
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class SecurityDepositsController : ControllerBase
@@ -17,10 +17,12 @@ namespace TRL_API.Controllers
 
         // Current tenancies, and ended ones that still have a deposit held
         [HttpGet("GetAll")]
+        [RequirePermission("deposits:view", "dashboard:view")]
         public async Task<IActionResult> GetAll() =>
             Ok(DataTableHelper.ToDictionaryList(await _service.GetTenanciesAsync(), true));
 
         [HttpGet("History")]
+        [RequirePermission("deposits:view")]
         public async Task<IActionResult> History([FromQuery] int tenantId, [FromQuery] int unitId)
         {
             if (tenantId <= 0 || unitId <= 0)
@@ -29,6 +31,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpPost("Record")]
+        [RequirePermission("deposits:edit")]
         public async Task<IActionResult> Record(RecordDepositRequest req)
         {
             var response = await _service.RecordAsync(req, User.GetUserId());
@@ -36,6 +39,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpPost("Correct")]
+        [RequirePermission("deposits:edit")]
         public async Task<IActionResult> Correct(CorrectDepositRequest req)
         {
             var response = await _service.CorrectAsync(req, User.GetUserId());
@@ -43,6 +47,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpPost("SetAgreed")]
+        [RequirePermission("deposits:edit")]
         public async Task<IActionResult> SetAgreed(SetDepositAgreedRequest req)
         {
             var response = await _service.SetAgreedAsync(req, User.GetUserId());
@@ -51,6 +56,7 @@ namespace TRL_API.Controllers
 
         // Data for the printable deposit receipt (Received entries only)
         [HttpGet("Receipt")]
+        [RequirePermission("deposits:view")]
         public async Task<IActionResult> Receipt([FromQuery] int depositId)
         {
             if (depositId <= 0)

@@ -7,7 +7,7 @@ using TRL_API.Models;
 namespace TRL_API.Controllers
 {
     // Data for printable payment receipts and invoices: read only.
-    [Authorize(Roles = "Admin")]
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class DocumentsController : ControllerBase
@@ -17,6 +17,7 @@ namespace TRL_API.Controllers
 
         // ids = one or more payment Ids, comma separated (e.g. the payments recorded together)
         [HttpGet("Receipts")]
+        [RequirePermission("rentCollection:view", "rentHistory:view", "payments:view", "settlements:view")]
         public async Task<IActionResult> Receipts([FromQuery] string? ids)
         {
             var (list, error) = _service.ParseReceiptIds(ids);
@@ -30,6 +31,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpGet("Invoice")]
+        [RequirePermission("rentHistory:view")]
         public async Task<IActionResult> Invoice([FromQuery] int invoiceId)
         {
             if (invoiceId <= 0)

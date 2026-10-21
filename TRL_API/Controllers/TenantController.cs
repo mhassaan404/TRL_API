@@ -6,7 +6,7 @@ using TRL_API.Models;
 
 namespace TRL_API.Controllers
 {
-    [Authorize(Roles = "Admin")]
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class TenantController : ControllerBase
@@ -18,6 +18,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpGet("GetTenants")]
+        [RequirePermission("tenants:view")]
         public async Task<IActionResult> GetTenants()
         {
             var data = await _service.GetTenants();
@@ -25,8 +26,8 @@ namespace TRL_API.Controllers
             return Ok(list);
         }
 
-        [Authorize(Roles = "Admin")]
         [HttpPost("Create")]
+        [RequirePermission("tenants:edit")]
         public async Task<IActionResult> CreateTenant(Tenants tenant)
         {
             if (tenant == null)
@@ -38,8 +39,8 @@ namespace TRL_API.Controllers
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
 
-        [Authorize(Roles = "Admin")]
         [HttpPut("Update")]
+        [RequirePermission("tenants:edit")]
         public async Task<IActionResult> UpdateTenant(Tenants tenant)
         {
             if (tenant == null)
@@ -51,8 +52,9 @@ namespace TRL_API.Controllers
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
 
-        [Authorize(Roles = "Admin")]
         [HttpDelete("Delete")]
+        [RequirePermission("tenants:edit")]
+        [RequirePermission("action:deleteCancel")]
         public async Task<IActionResult> DeleteTenant([FromQuery] int tenantId)
         {
             if (tenantId <= 0)

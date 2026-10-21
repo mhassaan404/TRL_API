@@ -35,6 +35,8 @@ builder.Services.AddScoped<IClientContext>(sp => sp.GetRequiredService<HttpClien
 
 // Add TokenService
 builder.Services.AddScoped<ITokenService, TokenService>();
+// The signed-in user's current access, checked by the permission attributes on every request (Helpers/UserAccess.cs)
+builder.Services.AddScoped<TRL_API.Helpers.UserAccess>();
 
 // Add services
 //builder.Services.AddControllers();

@@ -14,6 +14,12 @@ namespace TRL_API.Helpers
         public static string? Validate(string? current, string? newPassword, string? confirm, string username)
         {
             if (string.IsNullOrEmpty(current)) return "Please enter your current password.";
+            return ValidateNew(newPassword, confirm, username);
+        }
+
+        // A password set without the current one (the Super Admin creating a user or resetting a user's password)
+        public static string? ValidateNew(string? newPassword, string? confirm, string username)
+        {
             if (string.IsNullOrEmpty(newPassword)) return "Please enter a new password.";
             if (newPassword != confirm) return "The new password and its confirmation don't match.";
             if (newPassword.Length < MinLength) return $"The new password must be at least {MinLength} characters.";

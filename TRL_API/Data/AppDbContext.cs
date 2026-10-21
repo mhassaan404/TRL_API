@@ -14,5 +14,9 @@ namespace TRL_API.Data
 
         public DbSet<User> Users { get; set; } = null!;
         public DbSet<RefreshToken> RefreshTokens { get; set; } = null!;
+        public DbSet<UserPermission> UserPermissions { get; set; } = null!;
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder) =>
+            modelBuilder.Entity<UserPermission>().HasKey(p => new { p.UserId, p.Permission });
     }
 }

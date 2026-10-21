@@ -18,7 +18,7 @@ import {
 } from './lib.mjs'
 
 // Order matters only for auth: it changes the password and uses up the login rate limit, so it runs last
-const AREAS = ['leases', 'invoices', 'payments', 'deposits-settlement', 'reports', 'auth']
+const AREAS = ['leases', 'invoices', 'payments', 'deposits-settlement', 'reports', 'permissions', 'auth']
 
 const args = process.argv.slice(2)
 const keep = args.includes('--keep')

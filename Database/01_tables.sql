@@ -826,6 +826,7 @@ CREATE TABLE [dbo].[Users](
 	[Role] [nvarchar](50) NOT NULL,
 	[CreatedAt] [datetime] NULL,
 	[IsActive] [bit] NULL,
+	[FullName] [nvarchar](100) NULL,
  CONSTRAINT [PK_Users] PRIMARY KEY CLUSTERED 
 (
 	[UserId] ASC
@@ -848,5 +849,19 @@ GO
 ALTER TABLE [dbo].[Users] ADD  CONSTRAINT [DF_Users_CreatedAt]  DEFAULT (getdate()) FOR [CreatedAt]
 GO
 ALTER TABLE [dbo].[Users] ADD  CONSTRAINT [DF_Users_IsActive]  DEFAULT ((1)) FOR [IsActive]
+GO
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[UserPermissions](
+	[UserId] [int] NOT NULL,
+	[Permission] [nvarchar](50) NOT NULL,
+ CONSTRAINT [PK_UserPermissions] PRIMARY KEY CLUSTERED 
+(
+	[UserId] ASC,
+	[Permission] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+) ON [PRIMARY]
 GO
 

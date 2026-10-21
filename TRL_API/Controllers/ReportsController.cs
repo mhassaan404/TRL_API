@@ -7,7 +7,7 @@ using TRL_API.Models;
 namespace TRL_API.Controllers
 {
     // Reports: read only.
-    [Authorize(Roles = "Admin")]
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class ReportsController : ControllerBase
@@ -16,11 +16,13 @@ namespace TRL_API.Controllers
         public ReportsController(IReportService service) => _service = service;
 
         [HttpGet("ArrearsAgeing")]
+        [RequirePermission("arrearsReport:view", "dashboard:view")]
         public async Task<IActionResult> ArrearsAgeing() =>
             Ok(DataTableHelper.ToDictionaryList(await _service.GetArrearsAgeingAsync(), true));
 
         // Payments received from..to (payment dates, both days included)
         [HttpGet("Collections")]
+        [RequirePermission("collectionsReport:view", "dashboard:view")]
         public async Task<IActionResult> Collections([FromQuery] DateTime? from, [FromQuery] DateTime? to)
         {
             var error = _service.ValidateCollectionsRange(from, to);
@@ -32,11 +34,13 @@ namespace TRL_API.Controllers
 
         // Tenants for the statement picker (deleted tenants included, flagged)
         [HttpGet("StatementTenants")]
+        [RequirePermission("statementReport:view")]
         public async Task<IActionResult> StatementTenants() =>
             Ok(DataTableHelper.ToDictionaryList(await _service.GetStatementTenantsAsync(), true));
 
         // Account statement of one tenant from..to: opening balance, charges, credits, running and closing balance
         [HttpGet("TenantStatement")]
+        [RequirePermission("statementReport:view")]
         public async Task<IActionResult> TenantStatement([FromQuery] int tenantId, [FromQuery] DateTime? from, [FromQuery] DateTime? to)
         {
             if (tenantId <= 0)
@@ -53,6 +57,7 @@ namespace TRL_API.Controllers
 
         // Billed vs collected per month, fromMonth..toMonth (any day of the month), optionally for one building
         [HttpGet("BillingVsCollection")]
+        [RequirePermission("billingReport:view", "dashboard:view")]
         public async Task<IActionResult> BillingVsCollection([FromQuery] DateTime? fromMonth, [FromQuery] DateTime? toMonth,
             [FromQuery] int? buildingId)
         {
@@ -68,16 +73,19 @@ namespace TRL_API.Controllers
 
         // Buildings for report filters (removed buildings included, flagged)
         [HttpGet("Buildings")]
+        [RequirePermission("billingReport:view", "dashboard:view")]
         public async Task<IActionResult> Buildings() =>
             Ok(DataTableHelper.ToDictionaryList(await _service.GetReportBuildingsAsync(), true));
 
         // Occupancy / rent roll: every unit in use with its status, current and next lease, rent and arrears (today)
         [HttpGet("RentRoll")]
+        [RequirePermission("rentRollReport:view", "dashboard:view")]
         public async Task<IActionResult> RentRoll() =>
             Ok(DataTableHelper.ToDictionaryList(await _service.GetRentRollAsync(), true));
 
         // Maintenance jobs from..to (completed date, else reported date) with cost, billed and recovered amounts
         [HttpGet("MaintenanceCost")]
+        [RequirePermission("maintenanceCostReport:view")]
         public async Task<IActionResult> MaintenanceCost([FromQuery] DateTime? from, [FromQuery] DateTime? to)
         {
             var error = _service.ValidateMaintenanceRange(from, to);

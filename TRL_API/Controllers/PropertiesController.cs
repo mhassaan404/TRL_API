@@ -5,7 +5,7 @@ using TRL_API.Helpers;
 
 namespace TRL_API.Controllers
 {
-    [Authorize(Roles = "Admin")]
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class PropertiesController : ControllerBase
@@ -18,6 +18,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpGet("GetProperties")]
+        [RequirePermission("properties:view", "occupancy:view")]
         public async Task<IActionResult> GetProperties()
         {
             var data = await _service.GetProperties();
@@ -25,6 +26,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpGet("GetBuildings")]
+        [RequirePermission("properties:view")]
         public async Task<IActionResult> GetBuildings()
         {
             var data = await _service.GetBuildings();
@@ -32,6 +34,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpGet("GetFloorsByBuilding/{buildingId}")]
+        [RequirePermission("properties:view")]
         public async Task<IActionResult> GetFloorsByBuilding(int buildingId)
         {
             var data = await _service.GetFloorsByBuilding(buildingId);
@@ -39,6 +42,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpGet("GetUnitsByFloor/{floorId}")]
+        [RequirePermission("properties:view")]
         public async Task<IActionResult> GetUnitsByFloor(int floorId)
         {
             var data = await _service.GetUnitsByFloor(floorId);
@@ -46,6 +50,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpGet("GetUnitsStatus")]
+        [RequirePermission("properties:view")]
         public async Task<IActionResult> GetUnitsStatus()
         {
             var data = await _service.GetUnitsStatus();
@@ -53,6 +58,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpGet("GetCities")]
+        [RequirePermission("properties:view")]
         public async Task<IActionResult> GetCities()
         {
             var data = await _service.GetCities();
@@ -60,6 +66,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpGet("GetBuildingTypes")]
+        [RequirePermission("properties:view")]
         public async Task<IActionResult> GetBuildingTypes()
         {
             var data = await _service.GetBuildingTypes();
@@ -68,24 +75,25 @@ namespace TRL_API.Controllers
 
         // ---------------- BUILDING ----------------
 
-        [Authorize(Roles = "Admin")]
         [HttpPost("SaveBuilding")]
+        [RequirePermission("properties:edit")]
         public async Task<IActionResult> SaveBuilding([FromBody] UpdatePropertyRequest req)
         {
             var response = await _service.SaveBuilding(req.buildingName, req.cityId, req.typeId, req.address);
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
 
-        [Authorize(Roles = "Admin")]
         [HttpPut("UpdateBuilding/{id}")]
+        [RequirePermission("properties:edit")]
         public async Task<IActionResult> UpdateBuilding(int id, [FromBody] UpdatePropertyRequest req)
         {
             var response = await _service.UpdateBuilding(id, req.buildingName, req.cityId, req.typeId, req.address);
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
 
-        [Authorize(Roles = "Admin")]
         [HttpDelete("DeleteBuilding/{id}")]
+        [RequirePermission("properties:edit")]
+        [RequirePermission("action:deleteCancel")]
         public async Task<IActionResult> DeleteBuilding(int id)
         {
             var response = await _service.DeleteBuilding(id);
@@ -94,24 +102,25 @@ namespace TRL_API.Controllers
 
         // ---------------- FLOOR ----------------
 
-        [Authorize(Roles = "Admin")]
         [HttpPost("SaveFloor")]
+        [RequirePermission("properties:edit")]
         public async Task<IActionResult> SaveFloor([FromBody] UpdatePropertyRequest req)
         {
             var response = await _service.SaveFloor(req.buildingId, req.floorNumber ?? "");
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
 
-        [Authorize(Roles = "Admin")]
         [HttpPut("UpdateFloor/{id}")]
+        [RequirePermission("properties:edit")]
         public async Task<IActionResult> UpdateFloor(int id, [FromBody] UpdatePropertyRequest req)
         {
             var response = await _service.UpdateFloor(id, req.floorNumber ?? "");
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
 
-        [Authorize(Roles = "Admin")]
         [HttpDelete("DeleteFloor/{id}")]
+        [RequirePermission("properties:edit")]
+        [RequirePermission("action:deleteCancel")]
         public async Task<IActionResult> DeleteFloor(int id)
         {
             var response = await _service.DeleteFloor(id);
@@ -120,8 +129,8 @@ namespace TRL_API.Controllers
 
         // ---------------- UNIT ----------------
 
-        [Authorize(Roles = "Admin")]
         [HttpPost("SaveUnit")]
+        [RequirePermission("properties:edit")]
         public async Task<IActionResult> SaveUnit([FromBody] UpdatePropertyRequest req)
         {
             var response = await _service.SaveUnit(req.floorId, req.buildingId,
@@ -130,8 +139,8 @@ namespace TRL_API.Controllers
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
 
-        [Authorize(Roles = "Admin")]
         [HttpPut("UpdateUnit")]
+        [RequirePermission("properties:edit")]
         public async Task<IActionResult> UpdateUnit([FromBody] UpdatePropertyRequest req)
         {
             var response = await _service.UpdateUnit(req.unitId, req.floorId, req.buildingId,
@@ -140,8 +149,9 @@ namespace TRL_API.Controllers
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
 
-        [Authorize(Roles = "Admin")]
         [HttpDelete("DeleteUnit/{unitId}")]
+        [RequirePermission("properties:edit")]
+        [RequirePermission("action:deleteCancel")]
         public async Task<IActionResult> DeleteUnit(int unitId)
         {
             var response = await _service.DeleteUnitAsync(unitId);

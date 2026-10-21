@@ -7,7 +7,7 @@ using TRL_API.Models;
 
 namespace TRL_API.Controllers
 {
-    [Authorize(Roles = "Admin")]
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class RentController : ControllerBase
@@ -21,6 +21,7 @@ namespace TRL_API.Controllers
 
         // Tenants
         [HttpGet("GetTenants")]
+        [RequirePermission("rentCollection:view")]
         public async Task<IActionResult> GetTenants()
         {
             var data = await _service.GetTenantsAsync();
@@ -30,6 +31,7 @@ namespace TRL_API.Controllers
 
         // Invoices
         [HttpGet("GetInvoicesByTenant")]
+        [RequirePermission("rentCollection:view")]
         public async Task<IActionResult> GetInvoicesByTenant([FromQuery] int tenantId)
         {
             if (tenantId <= 0)
@@ -41,6 +43,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpGet("GetPaymentHistoryById")]
+        [RequirePermission("rentCollection:view")]
         public async Task<IActionResult> GetPaymentHistoryById([FromQuery] int invoiceId)
         {
             if (invoiceId <= 0)
@@ -51,6 +54,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpGet("GetUnpaidInvoiceByTenant")]
+        [RequirePermission("rentCollection:view")]
         public async Task<IActionResult> GetUnpaidInvoiceByTenant([FromQuery] int tenantId)
         {
             if (tenantId <= 0)
@@ -60,8 +64,9 @@ namespace TRL_API.Controllers
         }
 
 
-        [Authorize(Roles = "Admin")]
         [HttpPost("ReverseLateFee")]
+        [RequirePermission("rentCollection:edit")]
+        [RequirePermission("action:lateFee")]
         public async Task<IActionResult> ReverseLateFee([FromBody] ReverseLateFeeRequest req)
         {
             var response = await _service.ReverseLateFeeAsync(req.InvoiceId, req.Reason, User.GetUserId());
@@ -69,6 +74,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpGet("GetVacantUnits")]
+        [RequirePermission("leases:view")]
         public async Task<IActionResult> GetVacantUnits([FromQuery] int? includeUnitId) =>
             Ok(DataTableHelper.ToDictionaryList(await _service.GetVacantUnitsAsync(includeUnitId), true));
 
@@ -89,19 +95,25 @@ namespace TRL_API.Controllers
             return true;
         }
 
-        [Authorize(Roles = "Admin")]
         [HttpPost("SubmitPayments")]
-        public async Task<IActionResult> SubmitPayments(List<Payments> payments)
+        [RequirePermission("rentCollection:edit")]
+        public async Task<IActionResult> SubmitPayments(List<Payments> payments, [FromServices] UserAccess access)
         {
             if (!PaymentsValid(payments))
                 return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = "Invalid payment data" });
+            // A discount or a late-fee waiver inside a payment needs its own permission
+            if (payments.Any(p => p.DiscountAmount > 0 || p.DiscountPercent > 0) && !await access.CanAsync(Permissions.Discount))
+                return StatusCode(StatusCodes.Status403Forbidden, new ApiResponse { IsSuccess = false, ErrorMessage = "You don't have permission to give a discount. Ask your administrator." });
+            if (payments.Any(p => p.IsLateFeeWaived) && !await access.CanAsync(Permissions.LateFee))
+                return StatusCode(StatusCodes.Status403Forbidden, new ApiResponse { IsSuccess = false, ErrorMessage = "You don't have permission to waive a late fee. Ask your administrator." });
             var response = await _service.CreateRentAsync(payments, User.GetUserId());
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
 
         // Payments are never edited: a wrong one is reversed as a whole and entered again
-        [Authorize(Roles = "Admin")]
         [HttpPost("ReversePayment")]
+        [RequirePermission("rentHistory:edit")]
+        [RequirePermission("action:reversePayment")]
         public async Task<IActionResult> ReversePayment([FromBody] ReversePaymentRequest req)
         {
             if (req == null)
@@ -116,6 +128,7 @@ namespace TRL_API.Controllers
         // (ReversePayment). Existing adjustment rows stay and are shown as before.
 
         [HttpGet("GetRentCollection")]
+        [RequirePermission("rentCollection:view")]
         public async Task<IActionResult> GetRentCollection()
         {
             var data = await _service.GetRentCollectionAsync();
@@ -124,6 +137,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpGet("GetTenantsWithRent")]
+        [RequirePermission("rentCollection:view")]
         public async Task<IActionResult> GetTenantsWithRent()
         {
             var data = await _service.GetTenantsWithRentAsync();
@@ -131,6 +145,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpGet("GetPaymentHistory")]
+        [RequirePermission("rentCollection:view", "rentHistory:view")]
         public async Task<IActionResult> GetPaymentHistory([FromQuery] int invoiceId)
         {
             if (invoiceId <= 0)
@@ -142,8 +157,8 @@ namespace TRL_API.Controllers
         }
 
         // Bulk Operations
-        [Authorize(Roles = "Admin")]
         [HttpPut("BulkUpdateDueDate")]
+        [RequirePermission("rentCollection:edit")]
         public async Task<IActionResult> BulkUpdateDueDate([FromBody] BulkDueDateUpdateRequest request)
         {
             if (request == null)
@@ -154,6 +169,7 @@ namespace TRL_API.Controllers
 
         // For populating the tenant multiselect in Generate Invoices / Add Extra Charge
         [HttpGet("GetActiveTenants")]
+        [RequirePermission("rentCollection:view", "leases:view")]
         public async Task<IActionResult> GetActiveTenants()
         {
             var data = await _service.GetActiveTenantsAsync();
@@ -163,8 +179,8 @@ namespace TRL_API.Controllers
 
         // CHANGED from query-param GET-style to a body, since it now carries an
         // optional tenant list (All / one / several) alongside month/year.
-        [Authorize(Roles = "Admin")]
         [HttpPost("GenerateInvoices")]
+        [RequirePermission("rentCollection:edit")]
         public async Task<IActionResult> GenerateInvoices([FromBody] GenerateInvoicesRequest request)
         {
             var response = await _service.GenerateInvoicesAsync(
@@ -175,8 +191,8 @@ namespace TRL_API.Controllers
 
         // One-time extra charges (Maintenance, Utility, Damage, Rent Correction, Other) for one or more tenants:
         // a separate invoice each, independent of monthly rent. All or nothing.
-        [Authorize(Roles = "Admin")]
         [HttpPost("CreateExtraCharge")]
+        [RequirePermission("rentCollection:edit")]
         public async Task<IActionResult> CreateExtraCharge([FromBody] ExtraChargeRequest request)
         {
             var response = await _service.CreateExtraChargeAsync(request, User.GetUserId());
@@ -185,8 +201,9 @@ namespace TRL_API.Controllers
 
 
         //Newly Added
-        [Authorize(Roles = "Admin")]
         [HttpPost("ChargeLateFee")]
+        [RequirePermission("rentCollection:edit")]
+        [RequirePermission("action:lateFee")]
         public async Task<IActionResult> ChargeLateFee([FromQuery] int invoiceId)
         {
             if (invoiceId <= 0)
@@ -196,6 +213,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpGet("GetAllPayments")]
+        [RequirePermission("payments:view")]
         public async Task<IActionResult> GetAllPayments([FromQuery] DateTime? from, [FromQuery] DateTime? to)
         {
             var data = await _service.GetAllPaymentsAsync(from, to);

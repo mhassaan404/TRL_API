@@ -103,11 +103,12 @@ namespace TRL_API.Tests
         }
 
         [Fact]
-        public void Endpoint_is_admin_only_post_and_edit_route_is_gone()
+        public void Endpoint_needs_the_reverse_payment_permission_post_and_edit_route_is_gone()
         {
             var type = typeof(RentController);
-            Assert.Contains(type.GetCustomAttributes<AuthorizeAttribute>(), a => a.Roles == "Admin");
+            Assert.NotEmpty(type.GetCustomAttributes<AuthorizeAttribute>());
             var reverse = type.GetMethod(nameof(RentController.ReversePayment))!;
+            Assert.Contains(reverse.GetCustomAttributes<TRL_API.Helpers.RequirePermissionAttribute>(), a => a.AnyOf.SequenceEqual(new[] { TRL_API.Helpers.Permissions.ReversePayment }));
             Assert.Equal("ReversePayment", reverse.GetCustomAttribute<HttpPostAttribute>()?.Template);
             Assert.Null(type.GetMethod("UpdatePayments"));
             Assert.Null(type.GetMethod("CreatePaymentAdjustment")); // wrong payments are reversed, not adjusted

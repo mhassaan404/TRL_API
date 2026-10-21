@@ -9,7 +9,7 @@ using TRL_API.Models;
 
 namespace TRL_API.Controllers
 {
-    [Authorize(Roles = "Admin")]
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class DashboardController : ControllerBase
@@ -21,6 +21,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpGet("dashboard")]
+        [RequirePermission("dashboard:view")]
         public async Task<IActionResult> GetDashboardData()
         {
             var data = await _service.GetDashboardData();

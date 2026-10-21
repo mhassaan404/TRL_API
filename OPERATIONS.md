@@ -84,8 +84,8 @@ db71356) and run `D:\TRL\prod_import\verify_13_READONLY.sql` (`verify_12c_READON
 ## 4. Logs
 
 Warnings and errors go to `logs\trl-<yyyy-MM-dd>.log` (UTC dates) in the API folder, kept 30 days: unhandled errors
-(with the full exception), failed or locked logins, deactivated or non-Admin login attempts, refused refresh tokens,
-failed and successful password changes, clients that are misconfigured or behind on migrations. Only client code,
+(with the full exception), failed or locked logins, deactivated or unknown-role login attempts, refused refresh tokens,
+failed and successful password changes, users created / changed / switched off and password resets (with who did it), clients that are misconfigured or behind on migrations. Only client code,
 username and IP are written: never passwords, tokens, request bodies or connection strings. Line breaks in logged
 values are flattened, so nobody can fake a log line through a username.
 
@@ -104,7 +104,10 @@ alert by e-mail. It also warns when the site itself is down.
 
 ## 6. Security measures in place
 
-Admin-only API (a test fails if an endpoint is added without `[Authorize(Roles = "Admin")]`), per-client databases
+Permission-checked API: every endpoint needs a login and a permission check that reads the user's current access from
+the database on each request (a test fails if an endpoint is added without one; Helpers/Permissions.cs,
+RequirePermissionAttribute.cs). The Super Admin (Role = Admin) has everything; staff users (Role = User) only the pages
+(view / edit) and risky actions ticked on the Users page. Per-client databases
 chosen only from the signed token, parameterised SQL, HttpOnly + Secure cookies, 3-minute access tokens with rotating
 refresh tokens, CSRF header check on every state-changing request, CORS limited to the frontend, login limits per
 address and per username, generic error messages, and security headers (API: HSTS, `nosniff`, no framing, no

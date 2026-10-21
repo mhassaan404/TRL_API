@@ -7,7 +7,7 @@ using TRL_API.Models;
 namespace TRL_API.Controllers
 {
     // Move-out settlements (Rent > Move-out Settlements)
-    [Authorize(Roles = "Admin")]
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class SettlementsController : ControllerBase
@@ -17,6 +17,7 @@ namespace TRL_API.Controllers
 
         // Ended tenancies waiting for settlement, and settlements already recorded
         [HttpGet("GetAll")]
+        [RequirePermission("settlements:view")]
         public async Task<IActionResult> GetAll() => Ok(new
         {
             candidates = DataTableHelper.ToDictionaryList(await _service.GetCandidatesAsync(), true),
@@ -25,6 +26,7 @@ namespace TRL_API.Controllers
 
         // What would be settled now: tenancy, open invoices, deposit, rent months without an invoice
         [HttpGet("Preview")]
+        [RequirePermission("settlements:edit")]
         public async Task<IActionResult> Preview([FromQuery] int tenantId, [FromQuery] int unitId)
         {
             if (tenantId <= 0 || unitId <= 0)
@@ -42,6 +44,7 @@ namespace TRL_API.Controllers
         }
 
         [HttpPost("Finalize")]
+        [RequirePermission("settlements:edit")]
         public async Task<IActionResult> Finalize(FinalizeSettlementRequest req)
         {
             var response = await _service.FinalizeAsync(req, User.GetUserId());
@@ -50,6 +53,7 @@ namespace TRL_API.Controllers
 
         // A refund paid after the settlement was recorded
         [HttpPost("RecordRefund")]
+        [RequirePermission("settlements:edit")]
         public async Task<IActionResult> RecordRefund(RecordSettlementRefundRequest req)
         {
             var response = await _service.RecordRefundAsync(req, User.GetUserId());
@@ -58,6 +62,7 @@ namespace TRL_API.Controllers
 
         // Statement data
         [HttpGet("Get")]
+        [RequirePermission("settlements:view")]
         public async Task<IActionResult> Get([FromQuery] int id)
         {
             if (id <= 0)

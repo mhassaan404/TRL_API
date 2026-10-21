@@ -76,6 +76,11 @@ the next release (setting `SchemaVersion.Required` to it and regenerating `01`/`
 `RENT_ADJUSTED` with the new amount (`Amount`) and, since `2026-10-20_invoice_audit_old_amount`, the amount before
 (`OldAmount`). The Tenant Statement shows the invoice at its billed amount and each change as its own dated line.
 
+**Users and permissions** (`2026-10-21_user_permissions`): `Users.Role` is `Admin` (the Super Admin: everything, can't be
+changed on the Users page) or `User` (staff). A staff user's access is one row per permission in `dbo.UserPermissions`:
+`<page>:view` / `<page>:edit` and `action:<name>` for risky actions (list: `TRL_API/Helpers/Permissions.cs`). Any other role
+can't log in. Users are never deleted, only switched off (`IsActive = 0`), so their name stays on what they recorded.
+
 **A tenant's unit and rent** come from their lease: `dbo.TenantCurrentLease(@TenantId)` (the most recently made active
 lease; for a moved-out tenant, their last lease that wasn't a cancelled renewal). The old copy in `Tenants` is no longer
 read or written.

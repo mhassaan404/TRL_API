@@ -6,7 +6,7 @@ using TRL_API.Helpers;
 namespace TRL_API.Controllers
 {
     // Payment reminders: read only. The admin sends each reminder from WhatsApp; nothing is stored.
-    [Authorize(Roles = "Admin")]
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class RemindersController : ControllerBase
@@ -15,6 +15,7 @@ namespace TRL_API.Controllers
         public RemindersController(IReminderService service) => _service = service;
 
         [HttpGet("GetUnpaid")]
+        [RequirePermission("reminders:view")]
         public async Task<IActionResult> GetUnpaid() =>
             Ok(DataTableHelper.ToDictionaryList(await _service.GetUnpaidAsync(), true));
     }

@@ -93,8 +93,8 @@ namespace TRL_API.Controllers
                 const string msg = "This account is deactivated. Contact an administrator.";
                 return StatusCode(StatusCodes.Status403Forbidden, new ApiResponse { IsSuccess = false, Message = msg, ErrorMessage = msg });
             }
-            // Only Admin can use the app until tenant-specific access exists (every controller requires Admin)
-            if (user.Role != "Admin")
+            // Only the Super Admin and staff users can use the app (a staff user then sees only their permitted pages)
+            if (!Permissions.CanLogIn(user.Role))
             {
                 _logger.LogWarning("Login refused for {Client}/{User} from {Ip}: role {Role} has no access.", clientCode, request.Username, ClientIp, user.Role);
                 return StatusCode(StatusCodes.Status403Forbidden, new ApiResponse { IsSuccess = false, Message = "This account doesn't have access to the application.", ErrorMessage = "This account doesn't have access to the application." });
@@ -124,6 +124,7 @@ namespace TRL_API.Controllers
                 isSuccess = true,
                 message = "Login successful",
                 user = new { username = user.Username, role = user.Role, clientCode = client.ClientCode, clientName = client.ClientName },
+                access = await AccessOf(db, user),
             });
         }
 
@@ -141,7 +142,7 @@ namespace TRL_API.Controllers
             var hash = Hash(client.Token!);
             var tokenEntity = await db.RefreshTokens.Include(t => t.User).FirstOrDefaultAsync(t => t.Token == hash);
             if (tokenEntity == null || tokenEntity.IsRevoked || tokenEntity.Expires < DateTime.UtcNow
-                || tokenEntity.User.Role != "Admin" || tokenEntity.User.IsActive != true)
+                || !Permissions.CanLogIn(tokenEntity.User.Role) || tokenEntity.User.IsActive != true)
             {
                 // An old or stolen token, or one signed out by a password change; the token itself is not logged
                 _logger.LogWarning("Session refresh refused for client {Client} from {Ip}: {Reason}.", client.Client.ClientCode, ClientIp,
@@ -187,14 +188,36 @@ namespace TRL_API.Controllers
             return Ok(new ApiResponse { IsSuccess = true, Message = "Logged out successfully" });
         }
 
-        // Change My Password (signed-in Admin). The user comes only from the access token (user id + client id), so a
+        // The signed-in user's current access (the screen asks again when the app opens or regains focus, so the menu
+        // follows changes on the Users page; the server checks every action anyway)
+        [HttpGet("me")]
+        [Authorize]
+        [SignedInUser]
+        public async Task<IActionResult> Me([FromServices] UserAccess userAccess)
+        {
+            var access = (await userAccess.GetAsync())!;
+            return Ok(new { username = access.Username, fullName = access.FullName, isSuperAdmin = access.IsSuperAdmin, permissions = access.List });
+        }
+
+        // What the screen gets at login: same shape as Me
+        private static async Task<object> AccessOf(AppDbContext db, User user)
+        {
+            var superAdmin = user.Role == Permissions.SuperAdminRole;
+            var permissions = superAdmin
+                ? Permissions.All.OrderBy(p => p, StringComparer.Ordinal).ToList()
+                : await db.UserPermissions.Where(p => p.UserId == user.UserId).Select(p => p.Permission).OrderBy(p => p).ToListAsync();
+            return new { username = user.Username, fullName = user.FullName, isSuperAdmin = superAdmin, permissions };
+        }
+
+        // Change My Password (any signed-in user). The user comes only from the access token (user id + client id), so a
         // user can only change their own password, in their own client's database. Wrong current passwords are
         // throttled like logins (separate counter, so they never lock the normal login). On success every refresh
         // token of the user is deleted, which signs out all other sessions (their access token expires within
         // AccessTokenExpirationMinutes and can't be refreshed), and this browser gets a fresh session.
         // Passwords are never logged or returned.
         [HttpPost("change-password")]
-        [Authorize(Roles = "Admin")]
+        [Authorize]
+        [SignedInUser]
         public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request, [FromServices] IClientContext clientContext)
         {
             var client = clientContext.Client;
@@ -215,7 +238,7 @@ namespace TRL_API.Controllers
 
             await using var db = AppDbContext.ForDatabase(client.ConnectionString!);
             var user = await db.Users.FirstOrDefaultAsync(u => u.UserId == userId);
-            if (user == null || user.IsActive != true || user.Role != "Admin")
+            if (user == null || user.IsActive != true || !Permissions.CanLogIn(user.Role))
                 return ExpiredSession();
 
             // 400, not 401: a wrong current password is not an expired session (the frontend would log the user out)

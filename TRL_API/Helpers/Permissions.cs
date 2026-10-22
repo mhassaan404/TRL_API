@@ -24,7 +24,6 @@ namespace TRL_API.Helpers
             ["occupancy"] = false,
             ["rentCollection"] = true,
             ["rentHistory"] = true,
-            ["payments"] = false,
             ["leases"] = true,
             ["deposits"] = true,
             ["settlements"] = true,

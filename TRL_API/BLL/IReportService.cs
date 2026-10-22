@@ -8,6 +8,7 @@ namespace TRL_API.BLL
         Task<DataTable> GetArrearsAgeingAsync();
         string? ValidateCollectionsRange(DateTime? from, DateTime? to);
         Task<DataTable> GetCollectionsAsync(DateTime from, DateTime to);
+        Task<DataTable> GetCollectionRefundsAsync(DateTime from, DateTime to);
         Task<DataTable> GetStatementTenantsAsync();
         string? ValidateStatementRange(DateTime? from, DateTime? to);
         Task<TenantStatement?> GetTenantStatementAsync(int tenantId, DateTime from, DateTime to);

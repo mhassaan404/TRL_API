@@ -32,6 +32,18 @@ namespace TRL_API.Controllers
             return Ok(DataTableHelper.ToDictionaryList(await _service.GetCollectionsAsync(from!.Value, to!.Value), true));
         }
 
+        // Overpaid rent given back to tenants at move-out settlements, from..to (refund dates): Collections' "Refunded"
+        [HttpGet("CollectionRefunds")]
+        [RequirePermission("collectionsReport:view")]
+        public async Task<IActionResult> CollectionRefunds([FromQuery] DateTime? from, [FromQuery] DateTime? to)
+        {
+            var error = _service.ValidateCollectionsRange(from, to);
+            if (error != null)
+                return BadRequest(new ApiResponse { IsSuccess = false, ErrorMessage = error });
+
+            return Ok(DataTableHelper.ToDictionaryList(await _service.GetCollectionRefundsAsync(from!.Value, to!.Value), true));
+        }
+
         // Tenants for the statement picker (deleted tenants included, flagged)
         [HttpGet("StatementTenants")]
         [RequirePermission("statementReport:view")]

@@ -340,8 +340,8 @@ export default async ({ a, b }) => {
     const st = (await a.get(`/Reports/TenantStatement?tenantId=${ids.TA}&from=2000-01-01&to=${TODAY}`)).json
     ok(st.lines.some((l) => /Reversal of payment #/.test(l.description) && l.credit === -45000) && st.lines.some((l) => /Reversal of discount/.test(l.description) && l.credit === -5000),
        'Tenant Statement shows reversal lines (cash and discount)')
-    const all = (await a.get(`/Rent/GetAllPayments?from=${TODAY}&to=${TODAY}`)).json
-    ok(all.find((y) => y.paymentId === fullPay)?.reversedByPaymentId > 0 && all.some((y) => y.reversalOfPaymentId === fullPay), 'Payments page data marks original and reversal')
+    const all = (await a.get(`/Reports/Collections?from=${TODAY}&to=${TODAY}`)).json
+    ok(all.find((y) => y.paymentId === fullPay)?.reversedByPaymentId > 0 && all.find((y) => y.paymentId === fullPay)?.reversedAt && all.every((y) => y.enteredAt) && all.some((y) => y.reversalOfPaymentId === fullPay), 'Collections list marks original and reversal (with when and why it was reversed) and when each was entered')
   }
 
   section('payment window lists the same open invoices as Rent Collection')

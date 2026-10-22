@@ -29,6 +29,9 @@ namespace TRL_API.BLL
         public async Task<DataTable> GetCollectionsAsync(DateTime from, DateTime to) =>
             await _dal.GetCollectionsAsync(from.Date, to.Date);
 
+        public async Task<DataTable> GetCollectionRefundsAsync(DateTime from, DateTime to) =>
+            await _dal.GetCollectionRefundsAsync(from.Date, to.Date);
+
         public async Task<DataTable> GetStatementTenantsAsync() => await _dal.GetStatementTenantsAsync();
 
         // A statement can cover the tenant's whole history, so there is no length limit

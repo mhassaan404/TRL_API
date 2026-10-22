@@ -49,7 +49,7 @@ namespace TRL_API.DAL
 
         // 1 = the tenancy of invoice "ri" (its tenant + unit "u") still has an active lease (running or booked);
         // 0 = moved out of that unit. Without a unit: whether the tenant has any active lease. For the
-        // "Current / Moved out" filter on Rent History and Payment Records.
+        // "Current / Moved out" filter on Rent History.
         public const string LeaseCurrent = @"
                 CAST(CASE WHEN EXISTS (SELECT 1 FROM TenantLeases al
                                        WHERE al.TenantId = ri.TenantId AND al.IsActive = 1

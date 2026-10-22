@@ -31,12 +31,12 @@ export default async (ctx) => {
     ok(r.status === 400 && /taken/.test(errorText(r)), 'duplicate username refused', r.json)
     r = await a.post('/Users/Create', {
       username: STAFF, fullName: 'E2E Staff', email: 'staff@e2e.test', password: pass1, confirmPassword: pass1,
-      permissions: ['tenants:view', 'tenants:edit', 'payments:view', 'bogus:edit', 'payments:edit'],
+      permissions: ['tenants:view', 'tenants:edit', 'collectionsReport:view', 'bogus:edit', 'collectionsReport:edit', 'payments:view'],
     })
     ok(r.status === 200, 'staff user created', r.json)
     userId = await idOf()
     const stored = sql(DB.a, `SELECT Permission FROM UserPermissions WHERE UserId = ${userId} ORDER BY Permission`).map((x) => x[0])
-    ok(JSON.stringify(stored) === JSON.stringify(['payments:view', 'tenants:edit']), 'only known permissions stored, edit kept instead of view', stored)
+    ok(JSON.stringify(stored) === JSON.stringify(['collectionsReport:view', 'tenants:edit']), 'only known permissions stored, edit kept instead of view', stored)
     ok(num(DB.a, `SELECT COUNT(*) FROM Users WHERE UserId = ${userId} AND Role = N'User' AND IsActive = 1 AND PasswordHash NOT LIKE N'%${pass1}%'`) === 1,
       'stored as an active staff user with a hashed password')
   }
@@ -49,9 +49,12 @@ export default async (ctx) => {
     ok(r.status === 200 && r.json.fullName === 'E2E Staff' && r.json.permissions.length === 2, 'Auth/me returns name and permissions', r.json)
     r = await staff.get('/Tenant/GetTenants')
     ok(r.status === 200, 'allowed page data loads (tenants)', r.status)
-    r = await staff.get('/Rent/GetAllPayments')
-    ok(r.status === 200, 'allowed page data loads (payment records)', r.status)
-    for (const url of ['/Reports/ArrearsAgeing', '/Rent/GetRentCollection', '/Lease/GetAll', '/LateFeeSettings/Get', '/Users/GetAll', '/Dashboard/dashboard'])
+    r = await staff.get(`/Reports/Collections?from=2026-01-01&to=2026-12-31`)
+    ok(r.status === 200, 'allowed page data loads (collections)', r.status)
+    ok((await staff.get('/Rent/GetAllPayments')).status === 404, 'the old Payment Records data address is gone')
+    r = await staff.get('/Documents/Receipts?ids=999999')
+    ok(r.status !== 403 && r.status !== 401, 'Collections users may reprint receipts (no permission error)', r.status)
+    for (const url of ['/Reports/ArrearsAgeing', '/Reports/RentRoll', '/Rent/GetRentCollection', '/Lease/GetAll', '/LateFeeSettings/Get', '/Users/GetAll', '/Dashboard/dashboard'])
       ok((await staff.get(url)).status === 403, `not allowed: ${url} -> 403`)
     r = await staff.get('/CompanyProfile/Get')
     ok(r.status === 200, 'company name/logo for documents: any signed-in user', r.status)

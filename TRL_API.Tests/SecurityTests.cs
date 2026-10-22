@@ -89,13 +89,15 @@ namespace TRL_API.Tests
         [Fact]
         public void Permissions_are_normalized_and_edit_includes_view()
         {
-            var stored = Permissions.Normalize(new[] { "tenants:view", "tenants:edit", "payments:view", "payments:edit", "bogus", "action:discount", "dashboard:view", null! });
-            // unknown and impossible ones dropped (payments has no edit level), edit kept instead of view
-            Assert.Equal(new[] { "action:discount", "dashboard:view", "payments:view", "tenants:edit" }, stored);
+            var stored = Permissions.Normalize(new[] { "tenants:view", "tenants:edit", "collectionsReport:view", "collectionsReport:edit", "payments:view", "bogus", "action:discount", "dashboard:view", null! });
+            // unknown, removed (payments = old Payment Records page) and impossible ones dropped (reports have no edit level),
+            // edit kept instead of view
+            Assert.Equal(new[] { "action:discount", "collectionsReport:view", "dashboard:view", "tenants:edit" }, stored);
             var granted = stored.ToHashSet();
             Assert.True(Permissions.Grants(granted, "tenants:view"));
             Assert.True(Permissions.Grants(granted, "tenants:edit"));
-            Assert.False(Permissions.Grants(granted, "payments:edit"));
+            Assert.False(Permissions.Grants(granted, "collectionsReport:edit"));
+            Assert.DoesNotContain("payments:view", Permissions.All); // Payment Records was merged into Collections
             Assert.False(Permissions.Grants(granted, "leases:view"));
             Assert.False(Permissions.Grants(granted, "action:reversePayment"));
             Assert.True(new AccessInfo(1, "x", null, true, new HashSet<string>()).Can("action:reversePayment"));

@@ -1,6 +1,6 @@
 // Security deposits (agreed, received, corrections, receipts) and move-out settlement (finalize, deductions,
 // deposit applied to dues, final payment, refunds), checked against the database
-import { ADMIN_USER, DB, TODAY, apiTenancy, area, balanceOf, errorText, monthStart, num, ok, one, section, sql } from '../lib.mjs'
+import { ADMIN_USER, DB, TODAY, addDays, apiTenancy, area, balanceOf, errorText, monthStart, num, ok, one, section, sql } from '../lib.mjs'
 
 const parts = (d) => ({ month: Number(d.slice(5, 7)), year: Number(d.slice(0, 4)) })
 const round2 = (v) => Math.round(v * 100) / 100
@@ -54,7 +54,7 @@ export default async ({ a }) => {
     for (const d of [monthStart(TODAY, -1), TODAY]) await a.post('/Rent/GenerateInvoices', { tenantIds: [t1.tenantId], ...parts(d) })
     let r = await a.post('/Settlements/Finalize', { tenantId: t1.tenantId, unitId: t1.unitId, leaseId: t1.leaseId, expectedOutstanding: 0, expectedCredit: 0, expectedHeld: 20000, settlementDate: TODAY })
     ok(r.status === 400 && /current or upcoming lease/.test(errorText(r)), 'cannot settle while the lease is current', r.json)
-    // "Current / Moved out" flag on Rent History and Payment Records rows (per tenant + unit)
+    // "Current / Moved out" flag on Rent History and Collections rows (per tenant + unit)
     const historyOf = async (t) => ((await a.get('/RentHistory/History')).json || []).filter((x) => x.tenant === t.name)
     let mine = await historyOf(t1)
     ok(mine.length === 2 && mine.every((x) => x.leaseCurrent === true), 'Rent History: invoices of a current tenancy are marked current', mine.map((x) => x.leaseCurrent))
@@ -87,8 +87,8 @@ export default async ({ a }) => {
     ok(num(db, `SELECT COUNT(*) FROM RentInvoices ri JOIN Users u ON u.UserId = ri.CreatedBy WHERE ri.TenantId = ${t1.tenantId} AND ri.ChargeType = N'Cleaning' AND u.Username = N'${ADMIN_USER}'`) === 1,
        'settlement deduction invoice records who created it')
     ok(r.status === 200 && s1 > 0 && r.json.receiptIds?.length === 1, 'settlement finalized with a deduction and a final payment', r.json)
-    const pays = ((await a.get(`/Rent/GetAllPayments?from=${monthStart(TODAY, -2)}&to=${TODAY}`)).json || []).filter((x) => x.tenantId === t1.tenantId)
-    ok(pays.length > 0 && pays.every((x) => x.leaseCurrent === false), 'Payment Records: payments of a moved-out tenancy are marked moved out', pays.map((x) => x.leaseCurrent))
+    const pays = ((await a.get(`/Reports/Collections?from=${monthStart(TODAY, -2)}&to=${TODAY}`)).json || []).filter((x) => x.tenantId === t1.tenantId)
+    ok(pays.length > 0 && pays.every((x) => x.leaseCurrent === false), 'Collections: payments of a moved-out tenancy are marked moved out', pays.map((x) => x.leaseCurrent))
     ok((await historyOf(t1)).every((x) => x.leaseCurrent === false), 'Rent History: the settlement deduction invoice is marked moved out too')
     const [st] = sql(db, `SELECT OutstandingBefore, DeductionsTotal, DepositHeldBefore, DepositApplied, TenantOwes, RefundDue, FinalPaymentReceived FROM MoveOutSettlements WHERE Id = ${s1}`)
     ok(st.map(Number).join('|') === [outstanding, 2000, 20000, 20000, owes, 0, 5000].join('|'), 'settlement figures: owed = dues + deductions - deposit', st)
@@ -178,6 +178,55 @@ export default async ({ a }) => {
        'its invoices and deposit history are kept')
     r = await del(t2)
     ok(r.status === 400 && /not found or already deleted/.test(errorText(r)), 'deleting twice refused', r.json)
+  }
+
+  // ---- tenancy 5: overpaid rent given back at move-out
+  section('settlement: overpaid rent given back (Collections "Refunded")')
+  {
+    // 10,000 overpaid (credit), 5,000 deposit, 1,000 cleaning deduction: the credit pays the deduction first, so 9,000 of
+    // the 14,000 refund is rent given back; refunds give back the credit first (4,000 now, then 5,000 of the 10,000 later)
+    // (no rent invoice: a month's rent is overdue by now and would need a late-fee decision first)
+    const t5 = await apiTenancy(a, db, { start: monthStart(TODAY), rent: 40000 })
+    await a.post('/Rent/CreateExtraCharge', { tenantIds: [t5.tenantId], chargeType: 'Maintenance', description: 'E2E charge lowered later', amount: 12000 })
+    const charge = num(db, `SELECT MAX(Id) FROM RentInvoices WHERE TenantId = ${t5.tenantId} AND ChargeType = N'Maintenance'`)
+    let r = await record(t5, 5000)
+    ok(r.status === 200, 'deposit received (5,000)', r.json)
+    await a.post('/Lease/Terminate', { leaseId: t5.leaseId, reason: 'E2E move-out', moveOutDate: TODAY })
+    const open = sql(db, `SELECT ri.Id, b.Balance FROM RentInvoices ri CROSS APPLY dbo.InvoiceBalance(ri.Id, 0) b
+                          WHERE ri.TenantId = ${t5.tenantId} AND ri.StatusId <> 6 AND b.Balance > 0`)
+    r = await a.post('/Rent/SubmitPayments', open.map(([id, bal]) => ({
+      tenantId: t5.tenantId, rentInvoiceId: Number(id), paymentAmount: Number(bal), paymentDate: TODAY, paymentMethod: 'Cash',
+      discountAmount: 0, discountPercent: 0, isLateFeeWaived: false,
+    })))
+    ok(r.status === 200 && openBalance(t5) === 0, 'everything paid', r.json)
+    sql(db, `UPDATE RentInvoices SET TotalRent = TotalRent - 10000 WHERE Id = ${charge}`)
+    ok(openBalance(t5) === -10000, 'charge lowered afterwards: 10,000 overpaid (credit)')
+
+    const body = {
+      tenantId: t5.tenantId, unitId: t5.unitId, leaseId: t5.leaseId, expectedOutstanding: 0, expectedCredit: 10000, expectedHeld: 5000,
+      settlementDate: TODAY, deductions: [{ chargeType: 'Cleaning', amount: 1000, reason: 'E2E cleaning' }], acknowledgeUnbilled: true,
+    }
+    r = await a.post('/Settlements/Finalize', { ...body, refund: { amount: 4000, paymentMethod: 'Bank Transfer', reference: 'E2E' } })
+    const s5 = r.json?.id
+    ok(r.status === 200 && s5 > 0, 'settled: 4,000 refunded now', r.json)
+    ok(sql(db, `SELECT RefundDue, RefundPaid FROM MoveOutSettlements WHERE Id = ${s5}`)[0].map(Number).join('|') === '14000|4000',
+       'refund due 14,000 (deposit 5,000 + credit 10,000 - deduction 1,000)')
+    r = await a.post('/Settlements/RecordRefund', { settlementId: s5, amount: 10000, refundDate: TODAY, paymentMethod: 'Cash' })
+    ok(r.status === 200, 'remaining 10,000 refunded', r.json)
+
+    const refunds = (await a.get(`/Reports/CollectionRefunds?from=${TODAY}&to=${TODAY}`)).json || []
+    const mine = refunds.filter((x) => x.tenantId === t5.tenantId).map((x) => [x.settlementId, x.creditPart, x.refundTotal])
+    ok(JSON.stringify(mine) === JSON.stringify([[s5, 4000, 4000], [s5, 5000, 10000]]),
+       'Refunded: 4,000 of the first refund and 5,000 of the second are rent given back (9,000 in all, the deposit part is left out)', mine)
+    ok(refunds.length > 0 && refunds.every((x) => x.creditPart > 0 && x.leaseCurrent === false && x.recordedBy && x.enteredAt)
+       && !refunds.some((x) => x.tenantId === t1.tenantId),
+       'only refunds that give back rent are listed (deposit-only refunds are not), with who and when', refunds)
+    r = await a.get(`/Reports/CollectionRefunds?from=${monthStart(TODAY, -3)}&to=${addDays(TODAY, -1)}`)
+    ok(r.status === 200 && !(r.json || []).some((x) => x.tenantId === t5.tenantId), 'refunds outside the date range are left out', r.status)
+    const coll = ((await a.get(`/Reports/Collections?from=${TODAY}&to=${TODAY}`)).json || []).filter((x) => x.tenantId === t5.tenantId)
+    ok(coll.length > 0 && coll.every((x) => x.method !== 'Credit to Deposit')
+       && round2(coll.reduce((s, x) => s + x.amount, 0)) === round2(open.reduce((s, [, b]) => s + Number(b), 0)),
+       'Collections still shows the money received in full (the credit move is not a payment)', coll)
   }
 
   // ---- tenancy 4: settled with unbilled months skipped -> those months are never billed afterwards

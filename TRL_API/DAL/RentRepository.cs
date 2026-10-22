@@ -650,32 +650,5 @@ namespace TRL_API.DAL
 
             return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, new[] { new SqlParameter("@InvoiceId", invoiceId) });
         }
-
-        public async Task<DataTable> GetAllPaymentsAsync(DateTime? from, DateTime? to)
-        {
-            string query = @"
-                SELECT p.Id AS PaymentId, p.RentInvoiceId AS InvoiceId, t.TenantId, t.Name AS TenantName,
-                       bd.BuildingName, f.FloorNumber, u.UnitNumber, ri.ChargeType, ri.InvoiceDate, p.PaymentDate, p.PaymentAmount,
-                       p.DiscountAmount, p.PaymentMethod, p.Notes, p.IsLateFeeWaived, p.CreatedAt,
-                       p.ReversalOfPaymentId, rv.Id AS ReversedByPaymentId, rv.CreatedAt AS ReversedAt, rv.Notes AS ReversalReason,
-                       " + InvoiceSql.LeaseCurrent + @" AS LeaseCurrent
-                FROM Payments p
-                LEFT JOIN Payments rv ON rv.ReversalOfPaymentId = p.Id
-                INNER JOIN RentInvoices ri ON ri.Id = p.RentInvoiceId
-                INNER JOIN Tenants t ON t.TenantId = p.TenantId
-                LEFT JOIN Units u ON u.UnitId = COALESCE(ri.UnitId, (SELECT cl.UnitId FROM dbo.TenantCurrentLease(t.TenantId) cl))
-                LEFT JOIN Floors f ON u.FloorId = f.FloorId
-                LEFT JOIN Buildings bd ON f.BuildingId = bd.BuildingId
-                WHERE (@From IS NULL OR p.PaymentDate >= @From)
-                  AND (@To IS NULL OR p.PaymentDate < DATEADD(DAY, 1, @To))
-                ORDER BY p.PaymentDate DESC, p.Id DESC;";
-
-            var parameters = new[]
-            {
-                new SqlParameter("@From", SqlDbType.DateTime) { Value = (object?)from ?? DBNull.Value },
-                new SqlParameter("@To", SqlDbType.DateTime) { Value = (object?)to ?? DBNull.Value },
-            };
-            return await _dbHelper.ExecuteQueryReturnDataTableAsync(query, parameters);
-        }
     }
 }

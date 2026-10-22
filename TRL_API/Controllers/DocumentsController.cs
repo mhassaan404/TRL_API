@@ -17,7 +17,7 @@ namespace TRL_API.Controllers
 
         // ids = one or more payment Ids, comma separated (e.g. the payments recorded together)
         [HttpGet("Receipts")]
-        [RequirePermission("rentCollection:view", "rentHistory:view", "payments:view", "settlements:view")]
+        [RequirePermission("rentCollection:view", "rentHistory:view", "collectionsReport:view", "settlements:view")]
         public async Task<IActionResult> Receipts([FromQuery] string? ids)
         {
             var (list, error) = _service.ParseReceiptIds(ids);

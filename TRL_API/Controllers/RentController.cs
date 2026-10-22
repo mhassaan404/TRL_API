@@ -211,14 +211,6 @@ namespace TRL_API.Controllers
             var response = await _service.ChargeLateFeeAsync(invoiceId);
             return response.IsSuccess ? Ok(response) : BadRequest(response);
         }
-
-        [HttpGet("GetAllPayments")]
-        [RequirePermission("payments:view")]
-        public async Task<IActionResult> GetAllPayments([FromQuery] DateTime? from, [FromQuery] DateTime? to)
-        {
-            var data = await _service.GetAllPaymentsAsync(from, to);
-            return Ok(DataTableHelper.ToDictionaryList(data, true));
-        }
     }
 
     // Helper DTOs

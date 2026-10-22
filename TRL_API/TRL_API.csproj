@@ -5,6 +5,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>4fc4379e-b55b-41db-8338-83b7c83c5d12</UserSecretsId>
+    <!-- Debug runs through dotnet.exe instead of a freshly built TRL_API.exe, which Windows Smart App Control blocks.
+         Release / Publish is unchanged. -->
+    <UseAppHost Condition="'$(Configuration)' == 'Debug'">false</UseAppHost>
   </PropertyGroup>
 
   <ItemGroup>

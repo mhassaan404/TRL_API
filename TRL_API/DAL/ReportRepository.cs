@@ -41,16 +41,23 @@ namespace TRL_API.DAL
                 SELECT p.Id AS PaymentId, p.PaymentDate, p.PaymentAmount AS Amount, p.DiscountAmount AS Discount,
                        p.IsLateFeeWaived AS LateFeeWaived,
                        ISNULL(NULLIF(LTRIM(RTRIM(p.PaymentMethod)), ''), 'Unknown') AS Method,
-                       p.Notes, us.Username AS RecordedBy,
+                       p.Notes, us.Username AS RecordedBy, p.CreatedAt AS EnteredAt,
                        t.TenantId, t.Name AS TenantName,
                        ri.Id AS InvoiceId, ri.LeaseId, ri.InvoiceMonth, ri.InvoiceDate, ri.ChargeType,
                        bd.BuildingName, f.FloorNumber, u.UnitNumber,
                        -- A reversal is listed on its own date with negative amounts; ReversesWaiver = it also takes back
                        -- the original's late-fee waiver. ReversedByPaymentId marks an original that was reversed later.
                        p.ReversalOfPaymentId, CAST(ISNULL(orig.IsLateFeeWaived, 0) AS BIT) AS ReversesWaiver,
-                       (SELECT rv.Id FROM Payments rv WHERE rv.ReversalOfPaymentId = p.Id) AS ReversedByPaymentId
+                       rv.Id AS ReversedByPaymentId, rv.CreatedAt AS ReversedAt, rv.Notes AS ReversalReason,
+                       -- ""Current / Moved out"" filter: 1 = this tenant + unit still has an active lease (running or
+                       -- booked), 0 = moved out of that unit (same rule as InvoiceSql.LeaseCurrent, by the payment's tenant)
+                       CAST(CASE WHEN EXISTS (SELECT 1 FROM TenantLeases al
+                                              WHERE al.TenantId = p.TenantId AND al.IsActive = 1
+                                                AND (u.UnitId IS NULL OR al.UnitId = u.UnitId))
+                                 THEN 1 ELSE 0 END AS BIT) AS LeaseCurrent
                 FROM Payments p
                 LEFT JOIN Payments orig ON orig.Id = p.ReversalOfPaymentId
+                OUTER APPLY (SELECT TOP (1) r.Id, r.CreatedAt, r.Notes FROM Payments r WHERE r.ReversalOfPaymentId = p.Id ORDER BY r.Id) rv
                 INNER JOIN Tenants t ON p.TenantId = t.TenantId
                 LEFT JOIN RentInvoices ri ON ri.Id = p.RentInvoiceId
                 LEFT JOIN Units u ON u.UnitId = COALESCE(ri.UnitId, (SELECT cl.UnitId FROM dbo.TenantCurrentLease(t.TenantId) cl))
@@ -61,6 +68,46 @@ namespace TRL_API.DAL
                   -- Paid from the security deposit / credit moved at a move-out settlement: not money received
                   AND ISNULL(p.PaymentMethod, N'') NOT IN (N'Security Deposit', N'Credit to Deposit')
                 ORDER BY p.PaymentDate, p.Id;",
+                new[] { new SqlParameter("@From", SqlDbType.Date) { Value = from }, new SqlParameter("@To", SqlDbType.Date) { Value = to } });
+
+        // Collections: overpaid rent given back to tenants from @From to @To (refund dates, both days included).
+        // At a move-out settlement the tenant's credit (rent paid in excess) moves into the deposit and one refund pays
+        // back deposit and credit together. Only the credit part is rent given back (the deposit was never income):
+        //   - the credit first pays what the tenant still owed (outstanding + deductions): CreditLeft = Credit - Owed;
+        //   - refunds give back CreditLeft first, in the order they were paid (date, then entry).
+        // CreditPart = the part of each refund that is rent given back; rows with none are left out.
+        public async Task<DataTable> GetCollectionRefundsAsync(DateTime from, DateTime to) =>
+            await _dbHelper.ExecuteQueryReturnDataTableAsync(@"
+                WITH r AS (
+                    SELECT d.Id, d.SettlementId, d.EntryDate, -d.Amount AS Paid, d.PaymentMethod, d.Reference, d.CreatedAt, d.CreatedBy,
+                           s.TenantId, s.UnitId,
+                           CASE WHEN s.CreditBefore - s.OutstandingBefore - s.DeductionsTotal > 0
+                                THEN s.CreditBefore - s.OutstandingBefore - s.DeductionsTotal ELSE 0 END AS CreditLeft,
+                           SUM(-d.Amount) OVER (PARTITION BY d.SettlementId ORDER BY d.EntryDate, d.Id ROWS UNBOUNDED PRECEDING) + d.Amount AS PaidBefore
+                    FROM SecurityDeposits d
+                    INNER JOIN MoveOutSettlements s ON s.Id = d.SettlementId
+                    WHERE d.EntryType = 'Refund'),
+                c AS (
+                    SELECT r.*, CAST(CASE WHEN r.CreditLeft - r.PaidBefore <= 0 THEN 0
+                                          WHEN r.Paid < r.CreditLeft - r.PaidBefore THEN r.Paid
+                                          ELSE r.CreditLeft - r.PaidBefore END AS DECIMAL(18, 2)) AS CreditPart
+                    FROM r)
+                SELECT c.Id AS RefundId, c.SettlementId, c.EntryDate AS RefundDate, c.CreditPart, c.Paid AS RefundTotal,
+                       ISNULL(NULLIF(LTRIM(RTRIM(c.PaymentMethod)), ''), 'Unknown') AS Method, c.Reference,
+                       c.CreatedAt AS EnteredAt, us.Username AS RecordedBy,
+                       t.TenantId, t.Name AS TenantName, bd.BuildingName, f.FloorNumber, u.UnitNumber,
+                       -- same ""Current / Moved out"" flag as the payments (normally moved out: it is a move-out refund)
+                       CAST(CASE WHEN EXISTS (SELECT 1 FROM TenantLeases al
+                                              WHERE al.TenantId = c.TenantId AND al.IsActive = 1 AND al.UnitId = c.UnitId)
+                                 THEN 1 ELSE 0 END AS BIT) AS LeaseCurrent
+                FROM c
+                INNER JOIN Tenants t ON t.TenantId = c.TenantId
+                LEFT JOIN Units u ON u.UnitId = c.UnitId
+                LEFT JOIN Floors f ON u.FloorId = f.FloorId
+                LEFT JOIN Buildings bd ON f.BuildingId = bd.BuildingId
+                LEFT JOIN Users us ON us.UserId = c.CreatedBy
+                WHERE c.EntryDate >= @From AND c.EntryDate < DATEADD(DAY, 1, @To) AND c.CreditPart > 0
+                ORDER BY c.EntryDate, c.Id;",
                 new[] { new SqlParameter("@From", SqlDbType.Date) { Value = from }, new SqlParameter("@To", SqlDbType.Date) { Value = to } });
 
         // Tenant picker for statements: current and deleted (former) tenants, so old accounts can still be printed

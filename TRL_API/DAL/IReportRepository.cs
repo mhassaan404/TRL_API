@@ -6,6 +6,7 @@ namespace TRL_API.DAL
     {
         Task<DataTable> GetArrearsAgeingAsync();
         Task<DataTable> GetCollectionsAsync(DateTime from, DateTime to);
+        Task<DataTable> GetCollectionRefundsAsync(DateTime from, DateTime to);
         Task<DataTable> GetStatementTenantsAsync();
         Task<DataTable> GetStatementTenantAsync(int tenantId);
         Task<DataTable> GetStatementEntriesAsync(int tenantId, DateTime to);

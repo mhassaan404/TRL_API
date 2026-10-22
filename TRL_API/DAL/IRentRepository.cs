@@ -30,6 +30,5 @@ namespace TRL_API.DAL
         Task<DataTable> ChargeLateFeeAsync(int invoiceId);
         Task<DataTable> CreateExtraChargesAsync(IReadOnlyList<int> tenantIds, DateTime chargeDate, DateTime dueDate, string chargeType,
             string? description, decimal amount, int? relatedInvoiceId, decimal lateFeePerDay, decimal lateFeeMaxMultiplier, int? createdBy = null);
-        Task<DataTable> GetAllPaymentsAsync(DateTime? from, DateTime? to);
     }
 }

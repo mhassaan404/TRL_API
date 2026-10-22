@@ -445,10 +445,6 @@ namespace TRL_API.BLL
             };
         }
 
-
-        //Newly Added
-        public async Task<DataTable> GetAllPaymentsAsync(DateTime? from, DateTime? to) => await _dal.GetAllPaymentsAsync(from, to);
-
         public async Task<ApiResponse> ChargeLateFeeAsync(int invoiceId)
         {
             var dt = await _dal.ChargeLateFeeAsync(invoiceId);

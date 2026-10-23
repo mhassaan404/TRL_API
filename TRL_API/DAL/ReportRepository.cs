@@ -268,7 +268,8 @@ namespace TRL_API.DAL
                     LEFT JOIN Floors f ON f.FloorId = u.FloorId
                     WHERE p.PaymentDate >= @From AND p.PaymentDate < DATEADD(MONTH, 1, @To)
                       AND ISNULL(p.PaymentMethod, N'') NOT IN (N'Security Deposit', N'Credit to Deposit') -- not money received
-                      AND ISNULL(ri.StatusId, 0) <> 6
+                      -- Cash on a cancelled invoice still came in (old data from before an invoice with payments
+                      -- could not be cancelled): counted, as on Collections; a reversed one adds up to zero anyway
                       AND (@BuildingId IS NULL OR f.BuildingId = @BuildingId)
                 )
                 SELECT m.MonthStart,

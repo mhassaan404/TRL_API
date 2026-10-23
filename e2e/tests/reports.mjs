@@ -80,12 +80,58 @@ export default async ({ a }) => {
                                                WHERE ri.StatusId <> 6 AND ri.InvoiceMonth BETWEEN '${from}' AND '${to}'`)[0].map(Number)
     ok(rows.length === 14 && sum(rows, 'totalBilled') === billed && sum(rows, 'collected') === collected && sum(rows, 'discounts') === disc,
        `14 months; billed ${billed}, collected ${collected}, discounts ${disc}`, { n: rows.length, billed: sum(rows, 'totalBilled'), collected: sum(rows, 'collected') })
-    const cash = num(db, `SELECT ISNULL(SUM(p.PaymentAmount), 0) FROM Payments p JOIN RentInvoices ri ON ri.Id = p.RentInvoiceId
-                          WHERE p.PaymentDate >= '${from}' AND p.PaymentDate < DATEADD(MONTH, 1, '${to}') AND ri.StatusId <> 6
+    // every cash payment by its date, also one left on a cancelled invoice (old data): that money still came in
+    const cash = num(db, `SELECT ISNULL(SUM(p.PaymentAmount), 0) FROM Payments p
+                          WHERE p.PaymentDate >= '${from}' AND p.PaymentDate < DATEADD(MONTH, 1, '${to}')
                             AND ISNULL(p.PaymentMethod, N'') NOT IN (N'Security Deposit', N'Credit to Deposit')`)
     ok(sum(rows, 'cashReceived') === cash, `cash received by payment month = ${cash}`, sum(rows, 'cashReceived'))
     const r = await a.get(`/Reports/BillingVsCollection?fromMonth=${monthStart(TODAY, -70)}&toMonth=${to}`)
     ok(r.status === 400, 'more than 60 months refused', r.status)
+  }
+
+  section('every report adds up: each month and each building')
+  {
+    const from = monthStart(TODAY, -12)
+    const to = monthStart(TODAY, 1)
+    const buildings = sql(db, 'SELECT BuildingId FROM Buildings').map((x) => Number(x[0]))
+    // Billed = Collected + Discounts + Outstanding - Credit, for every month, for all buildings and for each one
+    const bad = []
+    let checked = 0
+    for (const b of [null, ...buildings]) {
+      const rows = (await a.get(`/Reports/BillingVsCollection?fromMonth=${from}&toMonth=${to}${b ? `&buildingId=${b}` : ''}`)).json || []
+      for (const x of rows) {
+        checked++
+        const rhs = round2(x.collected + x.discounts + x.outstanding - x.credit)
+        if (round2(x.totalBilled) !== rhs) bad.push({ building: b, month: x.monthStart, billed: x.totalBilled, rhs })
+      }
+    }
+    ok(checked > 14 && bad.length === 0, `billed = collected + discounts + outstanding - credit in all ${checked} month rows (all buildings and each building)`, bad)
+
+    // The buildings together = all buildings (nothing counted twice or lost)
+    const all = (await a.get(`/Reports/BillingVsCollection?fromMonth=${from}&toMonth=${to}`)).json
+    const each = []
+    for (const b of buildings) each.push(...((await a.get(`/Reports/BillingVsCollection?fromMonth=${from}&toMonth=${to}&buildingId=${b}`)).json || []))
+    const fields = ['totalBilled', 'collected', 'discounts', 'outstanding', 'credit', 'cashReceived']
+    const diff = fields.filter((f) => sum(all, f) !== sum(each, f)).map((f) => [f, sum(all, f), sum(each, f)])
+    ok(diff.length === 0, 'each building added up = all buildings (billed, collected, discounts, outstanding, credit, cash)', diff)
+
+    // Rent paid from a security deposit at move-out counts as collected (the invoice is paid) but not as cash
+    const [depositPaid, onInvoices] = sql(db, `SELECT ISNULL(SUM(p.PaymentAmount), 0), COUNT(*) FROM Payments p JOIN RentInvoices ri ON ri.Id = p.RentInvoiceId
+                                               WHERE p.PaymentMethod = N'Security Deposit' AND ri.StatusId <> 6 AND ri.InvoiceMonth BETWEEN '${from}' AND '${to}'`)[0].map(Number)
+    const cashOnInvoices = num(db, `SELECT ISNULL(SUM(p.PaymentAmount), 0) FROM Payments p JOIN RentInvoices ri ON ri.Id = p.RentInvoiceId
+                                    WHERE ISNULL(p.PaymentMethod, N'') <> N'Security Deposit' AND ri.StatusId <> 6 AND ri.InvoiceMonth BETWEEN '${from}' AND '${to}'`)
+    ok(onInvoices > 0 && sum(all, 'collected') === round2(cashOnInvoices + depositPaid),
+       `Collected includes rent paid from deposits (${depositPaid}) on top of the payments`, { collected: sum(all, 'collected'), cashOnInvoices, depositPaid })
+
+    // Collections (cash by payment date) = Billing vs Collection's cash received, month by month
+    const monthly = []
+    for (const m of [monthStart(TODAY, -1), monthStart(TODAY)]) {
+      const end = m === monthStart(TODAY) ? TODAY : addDays(monthStart(TODAY), -1)
+      const coll = (await a.get(`/Reports/Collections?from=${m}&to=${end}`)).json || []
+      const bvc = (await a.get(`/Reports/BillingVsCollection?fromMonth=${m}&toMonth=${m}`)).json || []
+      monthly.push([m, sum(coll, 'amount'), sum(bvc, 'cashReceived')])
+    }
+    ok(monthly.every(([, c, b]) => c === b), 'Collections Total Received = Billing vs Collection cash received (last and this month)', monthly)
   }
 
   section('Occupancy / Rent Roll and Dashboard')
